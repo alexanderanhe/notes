@@ -29,7 +29,7 @@ import {
 import type { Route } from "./+types/auth.verify-email";
 
 export function meta({}: Route.MetaArgs) {
-  return [{ title: "Verificar correo | Notas privadas" }];
+  return [{ title: "Verify email | Notes" }];
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -49,24 +49,24 @@ export async function action({ request }: Route.ActionArgs) {
     identifier: email,
   });
   if (!verifyEmailSchema.safeParse({ email, code }).success) {
-    return { error: "Ingresa un correo y código válidos.", email };
+    return { error: "Enter a valid email and code.", email };
   }
 
   const user = await findUserByEmail(email);
   if (!user || user.emailVerified || !user.verificationCodeHash) {
-    return { error: "El código no es válido.", email };
+    return { error: "The code is invalid.", email };
   }
 
   if (
     !user.verificationCodeExpiresAt ||
     user.verificationCodeExpiresAt.getTime() < Date.now()
   ) {
-    return { error: "El código expiró. Regístrate nuevamente.", email };
+    return { error: "The code expired. Sign up again.", email };
   }
 
   if (user.verificationAttempts >= maximumVerificationAttempts) {
     return {
-      error: "Superaste el límite de intentos. Regístrate nuevamente.",
+      error: "You exceeded the attempt limit. Sign up again.",
       email,
     };
   }
@@ -77,11 +77,11 @@ export async function action({ request }: Route.ActionArgs) {
       requestId: getRequestId(request),
       userId: user._id.toHexString(),
     });
-    return { error: "El código no es válido.", email };
+    return { error: "The code is invalid.", email };
   }
 
   if (!(await markEmailVerified(user))) {
-    return { error: "No fue posible verificar el correo.", email };
+    return { error: "The email could not be verified.", email };
   }
 
   logSafe("info", "email_verification_succeeded", {
@@ -97,18 +97,18 @@ export default function VerifyEmail({
 }: Route.ComponentProps) {
   return (
     <AuthLayout
-      title="Verifica tu correo"
-      description="Ingresa el código de 6 dígitos que enviamos a tu correo."
+      title="Verify your email"
+      description="Enter the 6-digit code we sent to your email."
       footer={
         <Link className="font-medium text-blue-600" to="/auth/register">
-          Volver al registro
+          Back to sign up
         </Link>
       }
     >
-      <AuthForm submitLabel="Verificar correo">
+      <AuthForm submitLabel="Verify email">
         <FormError message={actionData?.error} />
         <Field
-          label="Correo"
+          label="Email"
           name="email"
           type="email"
           inputMode="email"
@@ -116,7 +116,7 @@ export default function VerifyEmail({
           defaultValue={actionData?.email ?? loaderData.email}
         />
         <Field
-          label="Código"
+          label="Code"
           name="code"
           inputMode="numeric"
           autoComplete="one-time-code"

@@ -17,7 +17,7 @@ export interface DerivedKey {
 
 function getWebCrypto() {
   if (!globalThis.crypto?.subtle) {
-    throw new Error("Web Crypto API no está disponible.");
+    throw new Error("Web Crypto API is not available.");
   }
 
   return globalThis.crypto;
@@ -25,7 +25,7 @@ function getWebCrypto() {
 
 export function generateRandomBytes(length: number) {
   if (!Number.isSafeInteger(length) || length <= 0) {
-    throw new Error("La longitud debe ser un entero positivo.");
+    throw new Error("Length must be a positive integer.");
   }
 
   return getWebCrypto().getRandomValues(new Uint8Array(length));
@@ -62,11 +62,11 @@ export async function deriveKeyFromPassword(
   iterations = PBKDF2_ITERATIONS,
 ): Promise<DerivedKey> {
   if (!password) {
-    throw new Error("La contraseña es obligatoria.");
+    throw new Error("Password is required.");
   }
 
   if (!Number.isSafeInteger(iterations) || iterations < PBKDF2_ITERATIONS) {
-    throw new Error(`PBKDF2 requiere al menos ${PBKDF2_ITERATIONS} iteraciones.`);
+    throw new Error(`PBKDF2 requires at least ${PBKDF2_ITERATIONS} iterations.`);
   }
 
   const crypto = getWebCrypto();

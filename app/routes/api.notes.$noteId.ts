@@ -12,7 +12,7 @@ import type { Route } from "./+types/api.notes.$noteId";
 
 function requireNoteId(noteId: string | undefined) {
   if (!noteId) {
-    throw new Response("Nota no encontrada.", { status: 404 });
+    throw new Response("Note not found.", { status: 404 });
   }
   return noteId;
 }
@@ -24,7 +24,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   const summary = await getEncryptedNoteSummary(user._id, noteId);
 
   if (!summary) {
-    throw new Response("Nota no encontrada.", { status: 404 });
+    throw new Response("Note not found.", { status: 404 });
   }
   if (summary.isCritical) {
     await requireRecent2FA(
@@ -34,7 +34,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     );
   }
   const note = await getEncryptedNote(user._id, noteId);
-  if (!note) throw new Response("Nota no encontrada.", { status: 404 });
+  if (!note) throw new Response("Note not found.", { status: 404 });
 
   return Response.json({ note });
 }
@@ -46,14 +46,14 @@ export async function action({ params, request }: Route.ActionArgs) {
   const noteId = requireNoteId(params.noteId);
   const summary = await getEncryptedNoteSummary(user._id, noteId);
 
-  if (!summary) throw new Response("Nota no encontrada.", { status: 404 });
+  if (!summary) throw new Response("Note not found.", { status: 404 });
   if (summary.isCritical) {
     await requireRecent2FA(request, undefined, "/app");
   }
 
   if (request.method === "DELETE") {
     if (!(await deleteEncryptedNote(user._id, noteId))) {
-      throw new Response("Nota no encontrada.", { status: 404 });
+      throw new Response("Note not found.", { status: 404 });
     }
     return Response.json({ deleted: true });
   }
@@ -63,10 +63,10 @@ export async function action({ params, request }: Route.ActionArgs) {
     const note = await updateEncryptedNote(user._id, noteId, input);
 
     if (!note) {
-      throw new Response("Nota no encontrada.", { status: 404 });
+      throw new Response("Note not found.", { status: 404 });
     }
     return Response.json({ note });
   }
 
-  throw new Response("Método no permitido.", { status: 405 });
+  throw new Response("Method not allowed.", { status: 405 });
 }

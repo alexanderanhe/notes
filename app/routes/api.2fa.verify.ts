@@ -13,7 +13,7 @@ export async function action({ request }: Route.ActionArgs) {
   assertSameOrigin(request);
   enforceRateLimit(request, { bucket: "2fa_verify", limit: 10, windowMs: 15 * 60_000 });
   const user = await requirePendingTwoFactorUser(request);
-  if (request.method !== "POST") throw new Response("Método no permitido.", { status: 405 });
+  if (request.method !== "POST") throw new Response("Method not allowed.", { status: 405 });
   const parsed = twoFactorVerifySchema.safeParse(await request.json());
   if (!parsed.success) return failed(request, user._id.toHexString());
 
@@ -34,8 +34,8 @@ async function failed(request: Request, userId: string) {
   return Response.json(
     {
       error: failure.locked
-        ? "Demasiados intentos. Inicia sesión nuevamente."
-        : "El código no es válido.",
+        ? "Too many attempts. Sign in again."
+        : "The code is invalid.",
       sessionInvalidated: failure.locked,
     },
     { status: failure.locked ? 401 : 400, headers: failure.headers },

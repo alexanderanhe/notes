@@ -20,7 +20,7 @@ export async function action({ request }: Route.ActionArgs) {
   const user = await requireUser(request);
 
   if (request.method !== "POST") {
-    throw new Response("Método no permitido.", { status: 405 });
+    throw new Response("Method not allowed.", { status: 405 });
   }
 
   const input = parseEncryptedNoteInput(await request.json());

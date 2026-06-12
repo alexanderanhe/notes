@@ -8,7 +8,7 @@ import type { Route } from "./+types/settings.security.2fa.setup";
 
 export async function loader({ request }: Route.LoaderArgs) {
   const user = await requireUser(request);
-  if (user.twoFactor?.enabled) throw new Response("2FA ya está activo.", { status: 409 });
+  if (user.twoFactor?.enabled) throw new Response("2FA is already enabled.", { status: 409 });
   return null;
 }
 
@@ -28,7 +28,7 @@ export default function TwoFactorSetup() {
         if (!response.ok) throw new Error(result.error);
         setSetup(result);
       })
-      .catch(() => setError("No fue posible iniciar la configuración."));
+      .catch(() => setError("Setup could not be started."));
   }, []);
 
   async function confirm(event: FormEvent<HTMLFormElement>) {
@@ -44,33 +44,33 @@ export default function TwoFactorSetup() {
       });
       const result = (await response.json()) as { success?: boolean; error?: string; backupCodes?: string[] };
       if (!response.ok || !result.backupCodes) {
-        setError(result.error ?? "No fue posible activar 2FA.");
+        setError(result.error ?? "2FA could not be enabled.");
         return;
       }
       navigate("/settings/security/2fa/backup-codes", { state: { backupCodes: result.backupCodes }, replace: true });
     } catch {
-      setError("No fue posible activar 2FA.");
+      setError("2FA could not be enabled.");
     } finally {
       setWorking(false);
     }
   }
 
   return (
-    <SecurityLayout title="Activar 2FA" description="Escanea el QR con tu app autenticadora y confirma un código.">
+    <SecurityLayout title="Enable 2FA" description="Scan the QR code with your authenticator app and confirm a code.">
       <div className="space-y-5">
         <SecurityError message={error} />
-        {!setup ? <p className="text-sm text-zinc-500">Generando configuración...</p> : (
+        {!setup ? <p className="text-sm text-zinc-500">Generating setup...</p> : (
           <>
-            <img className="mx-auto rounded-xl" src={setup.qrDataUrl} alt="Código QR para configurar TOTP" width={280} height={280} />
+            <img className="mx-auto rounded-xl" src={setup.qrDataUrl} alt="QR code to configure TOTP" width={280} height={280} />
             <div>
-              <p className="text-sm text-zinc-600 dark:text-zinc-400">Clave manual:</p>
+              <p className="text-sm text-zinc-600 dark:text-zinc-400">Manual key:</p>
               <code className="mt-1 block break-all rounded-lg bg-zinc-100 p-3 text-sm dark:bg-zinc-950">{setup.manualKey}</code>
             </div>
             <form className="space-y-4" onSubmit={confirm}>
-              <label className="block text-sm font-medium">Código de 6 dígitos
+              <label className="block text-sm font-medium">6-digit code
                 <input className={`${codeInput} mt-2`} name="code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} required />
               </label>
-              <button className={primaryButton} disabled={working}>{working ? "Confirmando..." : "Confirmar y activar"}</button>
+              <button className={primaryButton} disabled={working}>{working ? "Confirming..." : "Confirm and enable"}</button>
             </form>
           </>
         )}

@@ -16,7 +16,7 @@ export async function action({ request }: Route.ActionArgs) {
     windowMs: 15 * 60_000,
   });
   if (request.method !== "POST") {
-    throw new Response("Método no permitido.", { status: 405 });
+    throw new Response("Method not allowed.", { status: 405 });
   }
 
   let user = await requireUser(request);
@@ -25,11 +25,11 @@ export async function action({ request }: Route.ActionArgs) {
   }
   const parsed = securityPreferencesSchema.safeParse(await request.json());
   if (!parsed.success) {
-    return Response.json({ error: "Preferencias inválidas." }, { status: 400 });
+    return Response.json({ error: "Invalid preferences." }, { status: 400 });
   }
   if (!(await setSecurityPreferences(user._id, parsed.data))) {
     return Response.json(
-      { error: "No fue posible guardar las preferencias." },
+      { error: "The preferences could not be saved." },
       { status: 400 },
     );
   }

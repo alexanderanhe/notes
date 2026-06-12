@@ -70,7 +70,7 @@ export function createTotpSetup(email: string) {
   return {
     secret,
     otpauthUrl: generateURI({
-      issuer: "Notas privadas",
+      issuer: "Notes",
       label: email,
       secret,
       digits: 6,

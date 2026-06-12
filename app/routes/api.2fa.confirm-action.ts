@@ -22,13 +22,13 @@ export async function action({ request }: Route.ActionArgs) {
     windowMs: 15 * 60_000,
   });
   if (request.method !== "POST") {
-    throw new Response("Método no permitido.", { status: 405 });
+    throw new Response("Method not allowed.", { status: 405 });
   }
 
   const user = await requireUser(request);
   if (!user.twoFactor?.enabled) {
     return Response.json(
-      { error: "No fue posible confirmar esta acción." },
+      { error: "This action could not be confirmed." },
       { status: 403 },
     );
   }
@@ -47,8 +47,8 @@ export async function action({ request }: Route.ActionArgs) {
     return Response.json(
       {
         error: failure.locked
-          ? "Demasiados intentos. Inicia sesión nuevamente."
-          : "El código no es válido.",
+          ? "Too many attempts. Sign in again."
+          : "The code is invalid.",
         sessionInvalidated: failure.locked,
       },
       { status: failure.locked ? 401 : 400, headers: failure.headers },

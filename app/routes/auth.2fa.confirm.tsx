@@ -10,13 +10,13 @@ import {
 import type { Route } from "./+types/auth.2fa.confirm";
 
 export function meta({}: Route.MetaArgs) {
-  return [{ title: "Confirmar acción | Notas privadas" }];
+  return [{ title: "Confirm action | Notes" }];
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
   const user = await requireUser(request);
   if (!user.twoFactor?.enabled) {
-    throw new Response("La autenticación de dos factores no está activa.", {
+    throw new Response("Two-factor authentication is not enabled.", {
       status: 403,
     });
   }
@@ -51,7 +51,7 @@ export default function ConfirmTwoFactorAction({
         sessionInvalidated?: boolean;
       };
       if (!response.ok || !result.success) {
-        setError(result.error ?? "No fue posible confirmar la acción.");
+        setError(result.error ?? "The action could not be confirmed.");
         if (result.sessionInvalidated) {
           window.setTimeout(() => window.location.assign("/auth/login"), 900);
         }
@@ -59,7 +59,7 @@ export default function ConfirmTwoFactorAction({
       }
       window.location.assign(result.redirectTo ?? loaderData.redirectTo);
     } catch {
-      setError("No fue posible confirmar la acción.");
+      setError("The action could not be confirmed.");
     } finally {
       setWorking(false);
     }
@@ -67,22 +67,22 @@ export default function ConfirmTwoFactorAction({
 
   return (
     <AuthLayout
-      title={loaderData.criticalNote ? "Nota crítica bloqueada" : "Confirma esta acción"}
+      title={loaderData.criticalNote ? "Critical note locked" : "Confirm this action"}
       description={
         loaderData.criticalNote
-          ? "Confirma tu segundo factor antes de acceder al contenido cifrado."
-          : "Esta operación requiere una verificación 2FA reciente."
+          ? "Confirm your second factor before accessing encrypted content."
+          : "This operation requires recent 2FA verification."
       }
       footer={
         <Link className="font-medium text-blue-600" to={loaderData.redirectTo}>
-          Cancelar
+          Cancel
         </Link>
       }
     >
       <form className="space-y-5" onSubmit={submit}>
         <FormError message={error} />
         <Field
-          label="Código TOTP o código de respaldo"
+          label="TOTP code or backup code"
           name="code"
           inputMode="text"
           autoComplete="one-time-code"
@@ -92,7 +92,7 @@ export default function ConfirmTwoFactorAction({
           disabled={working}
           className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
         >
-          {working ? "Confirmando..." : "Confirmar"}
+          {working ? "Confirming..." : "Confirm"}
         </button>
       </form>
     </AuthLayout>

@@ -23,23 +23,23 @@ export default function BackupCodes({ loaderData }: Route.ComponentProps) {
   }, [codes, location.pathname, navigate]);
 
   return (
-    <SecurityLayout title="Códigos de respaldo" description="Cada código funciona una sola vez. Guárdalos en un lugar seguro.">
+    <SecurityLayout title="Backup codes" description="Each code works once. Store them somewhere safe.">
       {codes?.length ? (
         <div className="space-y-5">
           <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
-            Esta es la única vez que se mostrarán estos códigos.
+            This is the only time these codes will be shown.
           </p>
           <ul className="grid grid-cols-2 gap-3 rounded-xl bg-zinc-100 p-4 font-mono dark:bg-zinc-950">
             {codes.map((code) => <li key={code}>{code}</li>)}
           </ul>
-          <Link className={`${primaryButton} inline-block`} replace to="/settings/security">Ya guardé los códigos</Link>
+          <Link className={`${primaryButton} inline-block`} replace to="/settings/security">I saved the codes</Link>
         </div>
       ) : (
         <div className="space-y-4">
           <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            Los códigos ya no están disponibles para mostrarse. Quedan {loaderData.remaining}.
+            The codes are no longer available to display. {loaderData.remaining} remain.
           </p>
-          <Link className={`${primaryButton} inline-block`} to="/settings/security">Volver a seguridad</Link>
+          <Link className={`${primaryButton} inline-block`} to="/settings/security">Back to security</Link>
         </div>
       )}
     </SecurityLayout>

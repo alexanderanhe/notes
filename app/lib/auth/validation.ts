@@ -8,11 +8,11 @@ export function isValidEmail(email: string) {
 
 export function validatePassword(password: string) {
   if (password.length < 8) {
-    return "La contraseña debe tener al menos 8 caracteres.";
+    return "The password must be at least 8 characters.";
   }
 
   if (password.length > 72) {
-    return "La contraseña no puede superar 72 caracteres.";
+    return "The password cannot exceed 72 characters.";
   }
 
   return null;

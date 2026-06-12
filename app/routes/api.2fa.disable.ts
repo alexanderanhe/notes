@@ -13,10 +13,10 @@ export async function action({ request }: Route.ActionArgs) {
     undefined,
     "/settings/security?action=disable",
   );
-  if (request.method !== "POST") throw new Response("Método no permitido.", { status: 405 });
+  if (request.method !== "POST") throw new Response("Method not allowed.", { status: 405 });
   if (await hasCriticalNotes(user._id)) {
     return Response.json(
-      { error: "Quita el modo crítico de tus notas antes de desactivar 2FA." },
+      { error: "Remove critical mode from your notes before disabling 2FA." },
       { status: 409 },
     );
   }

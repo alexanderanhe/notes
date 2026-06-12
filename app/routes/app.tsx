@@ -7,7 +7,7 @@ import { getThemePreference } from "~/lib/auth/users.server";
 import type { Route } from "./+types/app";
 
 export function meta({}: Route.MetaArgs) {
-  return [{ title: "Notas privadas" }];
+  return [{ title: "Notes" }];
 }
 
 export async function loader({ request }: Route.LoaderArgs) {

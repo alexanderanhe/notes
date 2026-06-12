@@ -35,7 +35,7 @@ import {
 import type { Route } from "./+types/auth.register";
 
 export function meta({}: Route.MetaArgs) {
-  return [{ title: "Crear cuenta | Notas privadas" }];
+  return [{ title: "Create account | Notes" }];
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -55,14 +55,14 @@ export async function action({ request }: Route.ActionArgs) {
   if (!parsed.success) return { error: formatValidationError(parsed.error), email };
   const { password } = parsed.data;
   const vault = vaultEnvelopeSchema.safeParse(parseVaultFields(formData));
-  if (!vault.success) return { error: "No fue posible preparar la bóveda.", email };
+  if (!vault.success) return { error: "The vault could not be prepared.", email };
 
   const existing = await findUserByEmail(email);
   if (existing?.emailVerified) {
-    return { error: "Ya existe una cuenta con este correo.", email };
+    return { error: "An account already exists for this email.", email };
   }
   if (!canSendVerificationEmail(existing, verificationEmailCooldownMs)) {
-    return { error: "Espera un minuto antes de solicitar otro código.", email };
+    return { error: "Wait one minute before requesting another code.", email };
   }
 
   const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
@@ -123,7 +123,7 @@ export default function Register() {
       await persistDeviceUnlock(result.userId, masterKey);
       window.location.assign(result.redirectTo);
     } catch {
-      setError("No fue posible crear la cuenta.");
+      setError("The account could not be created.");
     } finally {
       setWorking(false);
     }
@@ -131,13 +131,13 @@ export default function Register() {
 
   return (
     <AuthLayout
-      title="Crea tu cuenta"
-      description="Te enviaremos un código para verificar tu correo."
+      title="Create your account"
+      description="We will send you a code to verify your email."
       footer={
         <>
-          ¿Ya tienes cuenta?{" "}
+          Already have an account?{" "}
           <Link className="font-medium text-blue-600" to="/auth/login">
-            Inicia sesión
+            Sign in
           </Link>
         </>
       }
@@ -145,7 +145,7 @@ export default function Register() {
       <form onSubmit={handleSubmit} className="space-y-5">
         <FormError message={error} />
         <Field
-          label="Correo"
+          label="Email"
           name="email"
           type="email"
           inputMode="email"
@@ -153,7 +153,7 @@ export default function Register() {
           defaultValue={email}
         />
         <Field
-          label="Contraseña"
+          label="Password"
           name="password"
           type="password"
           autoComplete="new-password"
@@ -163,7 +163,7 @@ export default function Register() {
           disabled={working}
           className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-500 disabled:opacity-60"
         >
-          {working ? "Preparando bóveda..." : "Crear cuenta"}
+          {working ? "Preparing vault..." : "Create account"}
         </button>
       </form>
     </AuthLayout>

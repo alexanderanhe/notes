@@ -16,11 +16,11 @@ export async function action({ params, request }: Route.ActionArgs) {
     windowMs: 15 * 60_000,
   });
   if (request.method !== "POST" || !params.noteId) {
-    throw new Response("Método no permitido.", { status: 405 });
+    throw new Response("Method not allowed.", { status: 405 });
   }
   const parsed = criticalSchema.safeParse(await request.json());
   if (!parsed.success) {
-    return Response.json({ error: "Solicitud inválida." }, { status: 400 });
+    return Response.json({ error: "Invalid request." }, { status: 400 });
   }
   const user = await requireRecent2FA(
     request,
@@ -28,6 +28,6 @@ export async function action({ params, request }: Route.ActionArgs) {
     `/app?action=set-critical&noteId=${encodeURIComponent(params.noteId)}&value=${parsed.data.isCritical ? "true" : "false"}`,
   );
   const note = await setNoteCritical(user._id, params.noteId, parsed.data.isCritical);
-  if (!note) throw new Response("Nota no encontrada.", { status: 404 });
+  if (!note) throw new Response("Note not found.", { status: 404 });
   return Response.json({ success: true, note });
 }

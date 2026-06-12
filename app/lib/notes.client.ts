@@ -31,7 +31,7 @@ type ExtraPasswordFields = Required<
 
 function requireLegacyKeyFields(note: EncryptedNoteSummary) {
   if (!note.encryptedNoteKey || !note.noteKeyIv || !note.kdfSalt) {
-    throw new Error("La nota legacy no contiene material de migración.");
+    throw new Error("The legacy note does not contain migration material.");
   }
   return {
     encryptedNoteKey: note.encryptedNoteKey,
@@ -42,14 +42,14 @@ function requireLegacyKeyFields(note: EncryptedNoteSummary) {
 
 async function getContentKey(note: EncryptedNoteSummary, masterKey: CryptoKey) {
   if (note.hasExtraPassword) {
-    throw new Error("La nota requiere su contraseña adicional.");
+    throw new Error("The note requires its additional password.");
   }
 
   if (note.encryptionVersion !== LEGACY_NOTE_ENCRYPTION_VERSION) {
     return masterKey;
   }
 
-  throw new Error("La nota debe migrarse antes de descifrarla.");
+  throw new Error("The note must be migrated before it can be decrypted.");
 }
 
 function requireExtraPasswordFields(note: EncryptedNote): ExtraPasswordFields {
@@ -59,7 +59,7 @@ function requireExtraPasswordFields(note: EncryptedNote): ExtraPasswordFields {
     !note.extraPasswordEncryptedNoteKey ||
     !note.extraPasswordNoteKeyIv
   ) {
-    throw new Error("La nota protegida no contiene un sobre de clave válido.");
+    throw new Error("The protected note does not contain a valid key envelope.");
   }
 
   return {
@@ -140,7 +140,7 @@ export async function decryptNote(
     ? unlockedNoteKey
     : await getContentKey(note, masterKey);
   if (!contentKey) {
-    throw new Error("La nota requiere su contraseña adicional.");
+    throw new Error("The note requires its additional password.");
   }
   const [title, content] = await Promise.all([
     decryptString(

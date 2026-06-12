@@ -13,7 +13,7 @@ export async function action({ request }: Route.ActionArgs) {
     windowMs: 60_000,
   });
   if (request.method !== "POST") {
-    throw new Response("Método no permitido.", { status: 405 });
+    throw new Response("Method not allowed.", { status: 405 });
   }
 
   const user = await requireUser(request);
@@ -23,7 +23,7 @@ export async function action({ request }: Route.ActionArgs) {
     !(await setThemePreference(user._id, parsed.data.theme))
   ) {
     return Response.json(
-      { error: "No fue posible guardar el tema." },
+      { error: "The theme could not be saved." },
       { status: 400 },
     );
   }

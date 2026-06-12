@@ -13,7 +13,7 @@ export async function action({ request }: Route.ActionArgs) {
     undefined,
     "/settings/security?action=regenerate",
   );
-  if (request.method !== "POST") throw new Response("Método no permitido.", { status: 405 });
+  if (request.method !== "POST") throw new Response("Method not allowed.", { status: 405 });
   const backup = await generateBackupCodes();
   await replaceBackupCodes(user._id, backup.hashes);
   logSafe("info", "two_factor_backup_codes_regenerated", { requestId: getRequestId(request), userId: user._id.toHexString() });

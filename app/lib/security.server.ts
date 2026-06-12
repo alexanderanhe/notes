@@ -139,7 +139,7 @@ export function assertSameOrigin(request: Request) {
     (!origin && !fetchSite && hasSession) ||
     (!origin && fetchSite && !["same-origin", "none"].includes(fetchSite))
   ) {
-    throw new Response("Solicitud cross-site rechazada.", { status: 403 });
+    throw new Response("Cross-site request rejected.", { status: 403 });
   }
 }
 
@@ -168,7 +168,7 @@ export function enforceRateLimit(request: Request, options: RateLimitOptions) {
       bucket: options.bucket,
       requestId: getRequestId(request),
     });
-    throw new Response("Demasiadas solicitudes. Intenta más tarde.", {
+    throw new Response("Too many requests. Try again later.", {
       status: 429,
       headers: { "Retry-After": String(retryAfter) },
     });
@@ -177,6 +177,6 @@ export function enforceRateLimit(request: Request, options: RateLimitOptions) {
 
 export function formatValidationError(error: unknown) {
   return error instanceof ZodError
-    ? error.issues[0]?.message ?? "Datos inválidos."
-    : "Datos inválidos.";
+    ? error.issues[0]?.message ?? "Invalid data."
+    : "Invalid data.";
 }

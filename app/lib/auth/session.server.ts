@@ -124,7 +124,7 @@ export async function requireRecent2FA(
   const user = await requireUser(request);
   if (!user.twoFactor?.enabled) {
     throw Response.json(
-      { error: "Esta acción requiere autenticación de dos factores." },
+      { error: "This action requires two-factor authentication." },
       { status: 403 },
     );
   }
@@ -142,7 +142,7 @@ export async function requireRecent2FA(
   session.set("stepUpRedirectTo", safeRedirectTo(redirectTo));
   throw Response.json(
     {
-      error: "Confirma tu autenticación de dos factores para continuar.",
+      error: "Confirm your two-factor authentication to continue.",
       requiresRecent2FA: true,
       confirmUrl: "/auth/2fa/confirm",
     },

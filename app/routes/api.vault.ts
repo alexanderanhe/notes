@@ -19,16 +19,16 @@ export async function action({ request }: Route.ActionArgs) {
   enforceRateLimit(request, { bucket: "vault_write", limit: 10, windowMs: 60_000 });
   const user = await requireUser(request);
   if (request.method !== "PUT") {
-    throw new Response("Método no permitido.", { status: 405 });
+    throw new Response("Method not allowed.", { status: 405 });
   }
 
   const vault = vaultEnvelopeSchema.safeParse(await request.json());
   if (!vault.success) {
-    throw new Response("Envelope de bóveda inválido.", { status: 400 });
+    throw new Response("Invalid vault envelope.", { status: 400 });
   }
 
   if (!(await setUserVaultEnvelope(user._id, vault.data))) {
-    throw new Response("La bóveda ya está inicializada.", { status: 409 });
+    throw new Response("The vault is already initialized.", { status: 409 });
   }
   return Response.json({ vault: vault.data });
 }

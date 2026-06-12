@@ -6,7 +6,7 @@ import { requirePendingTwoFactorUser } from "~/lib/auth/session.server";
 import type { Route } from "./+types/auth.2fa";
 
 export function meta({}: Route.MetaArgs) {
-  return [{ title: "Verificación en dos pasos | Notas privadas" }];
+  return [{ title: "Two-factor verification | Notes" }];
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -35,13 +35,13 @@ export default function TwoFactorLogin({ loaderData }: Route.ComponentProps) {
         sessionInvalidated?: boolean;
       };
       if (!response.ok || !result.success) {
-        setError(result.error ?? "No fue posible verificar el código.");
+        setError(result.error ?? "The code could not be verified.");
         if (result.sessionInvalidated) window.setTimeout(() => window.location.assign("/auth/login"), 900);
         return;
       }
       window.location.assign("/app");
     } catch {
-      setError("No fue posible verificar el código.");
+      setError("The code could not be verified.");
     } finally {
       setWorking(false);
     }
@@ -54,18 +54,18 @@ export default function TwoFactorLogin({ loaderData }: Route.ComponentProps) {
 
   return (
     <AuthLayout
-      title="Verificación en dos pasos"
-      description="Ingresa el código de tu app autenticadora o un código de respaldo."
-      footer={<button className="font-medium text-blue-600" type="button" onClick={() => void cancel()}>Cancelar</button>}
+      title="Two-factor verification"
+      description="Enter a code from your authenticator app or a backup code."
+      footer={<button className="font-medium text-blue-600" type="button" onClick={() => void cancel()}>Cancel</button>}
     >
       <form className="space-y-5" onSubmit={submit}>
         <FormError message={error} />
-        <Field label="Código" name="code" inputMode="text" autoComplete="one-time-code" maxLength={9} />
+        <Field label="Code" name="code" inputMode="text" autoComplete="one-time-code" maxLength={9} />
         <p className="text-xs text-zinc-500">
-          Códigos de respaldo disponibles: {loaderData.backupCodesRemaining}
+          Backup codes available: {loaderData.backupCodesRemaining}
         </p>
         <button disabled={working} className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60">
-          {working ? "Verificando..." : "Verificar"}
+          {working ? "Verifying..." : "Verify"}
         </button>
       </form>
     </AuthLayout>

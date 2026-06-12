@@ -35,7 +35,7 @@ import {
 import type { Route } from "./+types/auth.login";
 
 export function meta({}: Route.MetaArgs) {
-  return [{ title: "Iniciar sesión | Notas privadas" }];
+  return [{ title: "Sign in | Notes" }];
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -65,13 +65,13 @@ export async function action({ request }: Route.ActionArgs) {
 
   if (!user || !(await verifySecret(password, user.passwordHash))) {
     logSafe("warn", "auth_login_failed", { requestId: getRequestId(request) });
-    return { error: "Correo o contraseña incorrectos.", email };
+    return { error: "Incorrect email or password.", email };
   }
 
   if (!user.emailVerified) {
     logSafe("warn", "auth_login_unverified", { requestId: getRequestId(request) });
     return {
-      error: "Verifica tu correo antes de iniciar sesión.",
+      error: "Verify your email before signing in.",
       email,
       needsVerification: true,
     };
@@ -81,7 +81,7 @@ export async function action({ request }: Route.ActionArgs) {
   if (!vault) {
     const parsedVault = vaultEnvelopeSchema.safeParse(candidateVault);
     if (!parsedVault.success) {
-      return { error: "No fue posible preparar la bóveda.", email };
+      return { error: "The vault could not be prepared.", email };
     }
     if (!(await setUserVaultEnvelope(user._id, parsedVault.data))) {
       const refreshedUser = await findUserByEmail(email);
@@ -151,7 +151,7 @@ export default function Login() {
       }
 
       if (!result.vault) {
-        setError("La cuenta no contiene una bóveda válida.");
+        setError("The account does not contain a valid vault.");
         return;
       }
 
@@ -163,7 +163,7 @@ export default function Login() {
             : await openVaultEnvelope(password, result.vault);
       } catch {
         setError(
-          "La contraseña autentica la cuenta, pero no puede descifrar su bóveda. No es posible recuperar notas cifradas sin la contraseña original.",
+          "The password authenticates the account but cannot decrypt its vault. Encrypted notes cannot be recovered without the original password.",
         );
         return;
       }
@@ -172,7 +172,7 @@ export default function Login() {
         await persistDeviceUnlock(result.userId, masterKey);
       } catch {
         setError(
-          "La bóveda abrió, pero el navegador no permitió guardar la recuperación local. Revisa que IndexedDB esté habilitado.",
+          "The vault opened, but the browser could not save local recovery data. Make sure IndexedDB is enabled.",
         );
         return;
       }
@@ -185,7 +185,7 @@ export default function Login() {
       const sessionCheck = await fetch("/api/vault", { redirect: "manual" });
       if (!sessionCheck.ok) {
         setError(
-          "La contraseña es correcta, pero el navegador no conservó la sesión. Usa HTTPS o abre la aplicación desde localhost.",
+          "The password is correct, but the browser did not preserve the session. Use HTTPS or open the application from localhost.",
         );
         return;
       }
@@ -194,13 +194,13 @@ export default function Login() {
         await migrateLegacyNotes(password, masterKey);
       } catch {
         setError(
-          "La sesión inició, pero no fue posible migrar las notas antiguas. La contraseña anterior de bóveda podría ser diferente.",
+          "The session started, but older notes could not be migrated. The previous vault password may be different.",
         );
         return;
       }
       window.location.assign("/app");
     } catch {
-      setError("No fue posible completar el inicio de sesión.");
+      setError("Sign in could not be completed.");
     } finally {
       setWorking(false);
     }
@@ -208,13 +208,13 @@ export default function Login() {
 
   return (
     <AuthLayout
-      title="Inicia sesión"
-      description="Accede a tus notas privadas."
+      title="Sign in"
+      description="Access your private notes."
       footer={
         <>
-          ¿No tienes cuenta?{" "}
+          Don't have an account?{" "}
           <Link className="font-medium text-blue-600" to="/auth/register">
-            Regístrate
+            Sign up
           </Link>
         </>
       }
@@ -226,11 +226,11 @@ export default function Login() {
             className="block text-sm font-medium text-blue-600"
             to={`/auth/verify-email?email=${encodeURIComponent(email)}`}
           >
-            Ingresar código de verificación
+            Enter verification code
           </Link>
         ) : null}
         <Field
-          label="Correo"
+          label="Email"
           name="email"
           type="email"
           inputMode="email"
@@ -238,7 +238,7 @@ export default function Login() {
           defaultValue={email}
         />
         <Field
-          label="Contraseña"
+          label="Password"
           name="password"
           type="password"
           autoComplete="current-password"
@@ -248,7 +248,7 @@ export default function Login() {
           disabled={working}
           className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-500 disabled:opacity-60"
         >
-          {working ? "Abriendo bóveda..." : "Iniciar sesión"}
+          {working ? "Opening vault..." : "Sign in"}
         </button>
       </form>
     </AuthLayout>

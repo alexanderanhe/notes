@@ -12,7 +12,6 @@ import {
 } from "react";
 import {
   FiArchive,
-  FiBookOpen,
   FiCheck,
   FiChevronDown,
   FiChevronUp,
@@ -154,7 +153,7 @@ export function NotesDesktop({
   }, []);
 
   useEffect(() => {
-    loadNotes().catch(() => setError("No fue posible cargar las notas."));
+    loadNotes().catch(() => setError("Notes could not be loaded."));
   }, [loadNotes]);
 
   useEffect(() => {
@@ -163,14 +162,14 @@ export function NotesDesktop({
       notes.map(async (note) => [
         note.id,
         note.isCritical
-          ? "Nota crítica"
+          ? "Critical note"
           : note.hasExtraPassword
-            ? "Nota protegida"
+            ? "Protected note"
             : await decryptNoteTitle(note, masterKey),
       ] as const),
     )
       .then((entries) => setTitles(Object.fromEntries(entries)))
-      .catch(() => setError("No fue posible descifrar los títulos."));
+      .catch(() => setError("Note titles could not be decrypted."));
   }, [masterKey, notes]);
 
   useEffect(() => {
@@ -208,7 +207,7 @@ export function NotesDesktop({
       });
     } catch {
       setTheme(previous);
-      setError("No fue posible guardar el tema.");
+      setError("The theme could not be saved.");
     }
   }
 
@@ -246,7 +245,7 @@ export function NotesDesktop({
         );
         setTitles((current) => ({
           ...current,
-          [note.id]: note.hasExtraPassword ? "Nota protegida" : snapshot.title || "Sin título",
+          [note.id]: note.hasExtraPassword ? "Protected note" : snapshot.title || "Untitled",
         }));
         updateWindow(key, (current) => ({
           ...current,
@@ -256,7 +255,7 @@ export function NotesDesktop({
         }));
       } catch {
         updateWindow(key, (window) => ({ ...window, sync: "error" }));
-        setError("No fue posible sincronizar una nota.");
+        setError("A note could not be synced.");
       } finally {
         savingRef.current.delete(key);
       }
@@ -330,7 +329,7 @@ export function NotesDesktop({
         window.location.assign(result.confirmUrl ?? "/auth/2fa/confirm");
         return;
       }
-      if (!response.ok || !result.note) throw new Error("No fue posible abrir la nota.");
+      if (!response.ok || !result.note) throw new Error("The note could not be opened.");
       const note = result.note;
       if (note.hasExtraPassword) {
         setPasswordAction({ mode: "open", note });
@@ -339,7 +338,7 @@ export function NotesDesktop({
       }
       setSidebarOpen(false);
     } catch {
-      setError("No fue posible abrir la nota.");
+      setError("The note could not be opened.");
     } finally {
       setWorking(false);
     }
@@ -366,7 +365,7 @@ export function NotesDesktop({
         return;
       }
       if (!response.ok || !result.note) {
-        throw new Error(result.error ?? "No fue posible actualizar la nota.");
+        throw new Error(result.error ?? "The note could not be updated.");
       }
       const summary = result.note;
       setNotes((current) =>
@@ -375,7 +374,7 @@ export function NotesDesktop({
       setTitles((current) => ({
         ...current,
         [summary.id]: summary.isCritical
-          ? "Nota crítica"
+          ? "Critical note"
           : windowsRef.current.find((window) => window.encrypted?.id === summary.id)
               ?.title ?? current[summary.id],
       }));
@@ -390,7 +389,7 @@ export function NotesDesktop({
         ),
       );
     } catch {
-      setError("No fue posible actualizar el modo crítico.");
+      setError("Critical mode could not be updated.");
     } finally {
       setWorking(false);
     }
@@ -427,7 +426,7 @@ export function NotesDesktop({
 
   async function deleteWindowNote(key: number) {
     const target = windowsRef.current.find((window) => window.key === key);
-    if (!target?.encrypted || !window.confirm("¿Eliminar esta nota permanentemente?")) return;
+    if (!target?.encrypted || !window.confirm("Permanently delete this note?")) return;
     setWorking(true);
     try {
       await requestJson(`/api/notes/${target.encrypted.id}`, { method: "DELETE" });
@@ -439,7 +438,7 @@ export function NotesDesktop({
       });
       updateWindows((current) => current.filter((window) => window.key !== key));
     } catch {
-      setError("No fue posible eliminar la nota.");
+      setError("The note could not be deleted.");
     } finally {
       setWorking(false);
     }
@@ -478,7 +477,7 @@ export function NotesDesktop({
       body: JSON.stringify(input),
     });
     setNotes((current) => sortNotes([...current.filter((item) => item.id !== note.id), note]));
-    setTitles((current) => ({ ...current, [note.id]: note.hasExtraPassword ? "Nota protegida" : target.title || "Sin título" }));
+    setTitles((current) => ({ ...current, [note.id]: note.hasExtraPassword ? "Protected note" : target.title || "Untitled" }));
     updateWindow(key, (window) => ({ ...window, encrypted: note, contentKey, dirty: false, sync: "saved" }));
   }
 
@@ -493,7 +492,7 @@ export function NotesDesktop({
       } else {
         await saveWindow(passwordAction.windowKey);
         const target = windowsRef.current.find((window) => window.key === passwordAction.windowKey);
-        if (!target?.encrypted) throw new Error("La nota debe guardarse primero.");
+        if (!target?.encrypted) throw new Error("The note must be saved first.");
         if (passwordAction.mode === "protect") {
           const result = await protectNote({ title: target.title, content: target.content }, newPassword, target);
           await updateProtection(result.input, result.noteKey, target.key);
@@ -510,13 +509,13 @@ export function NotesDesktop({
       }
       setPasswordAction(null);
     } catch {
-      setError("No fue posible completar la operación. Verifica la contraseña.");
+      setError("The operation could not be completed. Check the password.");
     } finally {
       setWorking(false);
     }
   }
 
-  if (loading || !unlocked) return <FullMessage>Cargando bóveda cifrada...</FullMessage>;
+  if (loading || !unlocked) return <FullMessage>Loading encrypted vault...</FullMessage>;
 
   const filteredNotes = notes.filter((note) => {
     if (filter === "favorites" && !note.pinned) return false;
@@ -528,29 +527,29 @@ export function NotesDesktop({
   return (
     <>
       <main className="flex h-dvh overflow-hidden bg-zinc-100 text-zinc-950 dark:bg-[#08090b] dark:text-zinc-100">
-        {sidebarOpen ? <button aria-label="Cerrar navegación" className="fixed inset-0 z-30 bg-black/40 lg:hidden" onClick={() => setSidebarOpen(false)} /> : null}
+        {sidebarOpen ? <button aria-label="Close navigation" className="fixed inset-0 z-30 bg-black/40 lg:hidden" onClick={() => setSidebarOpen(false)} /> : null}
         <aside className={`${sidebarOpen ? "translate-x-0" : "-translate-x-full"} fixed inset-y-0 left-0 z-40 flex h-dvh max-h-dvh w-72 flex-col overflow-hidden border-r border-zinc-200 bg-zinc-50 transition-transform lg:static lg:translate-x-0 dark:border-zinc-800 dark:bg-zinc-900`}>
           <div className="flex items-center gap-3 px-4 py-4">
-            <div className="grid h-8 w-8 place-items-center rounded-lg bg-zinc-950 text-white dark:bg-white dark:text-zinc-950"><FiBookOpen /></div>
-            <div className="min-w-0"><p className="text-sm font-semibold">Notas privadas</p><p className="truncate text-xs text-zinc-500">{email}</p></div>
+            <img src="/icon.svg" alt="" className="h-8 w-8 rounded-lg" />
+            <div className="min-w-0"><p className="text-sm font-semibold">Notes</p><p className="truncate text-xs text-zinc-500">{email}</p></div>
           </div>
           <div className="space-y-2 px-2">
-            <SidebarButton icon={<FiPlus />} label="Nueva nota" onClick={createNote} />
+            <SidebarButton icon={<FiPlus />} label="New note" onClick={createNote} />
             <label className="relative block">
               <FiSearch className="absolute top-2.5 left-2.5 text-zinc-400" />
-              <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar notas" className="w-full rounded-md bg-zinc-200/60 py-2 pr-3 pl-8 text-sm outline-none dark:bg-zinc-800" />
+              <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search notes" className="w-full rounded-md bg-zinc-200/60 py-2 pr-3 pl-8 text-sm outline-none dark:bg-zinc-800" />
             </label>
           </div>
           <nav className="mt-4 space-y-1 px-2">
-            <SidebarButton active={filter === "all"} icon={<FiFolder />} label="Todas" count={notes.filter((note) => !note.archived).length} onClick={() => setFilter("all")} />
-            <SidebarButton active={filter === "favorites"} icon={<FiStar />} label="Favoritas" count={notes.filter((note) => note.pinned && !note.archived).length} onClick={() => setFilter("favorites")} />
-            <SidebarButton active={filter === "archived"} icon={<FiArchive />} label="Archivadas" count={notes.filter((note) => note.archived).length} onClick={() => setFilter("archived")} />
+            <SidebarButton active={filter === "all"} icon={<FiFolder />} label="All" count={notes.filter((note) => !note.archived).length} onClick={() => setFilter("all")} />
+            <SidebarButton active={filter === "favorites"} icon={<FiStar />} label="Favorites" count={notes.filter((note) => note.pinned && !note.archived).length} onClick={() => setFilter("favorites")} />
+            <SidebarButton active={filter === "archived"} icon={<FiArchive />} label="Archived" count={notes.filter((note) => note.archived).length} onClick={() => setFilter("archived")} />
           </nav>
           <div className="mt-4 min-h-0 flex-1 overflow-y-auto px-2">
             {filteredNotes.map((note) => (
               <button key={note.id} type="button" onClick={() => void openNote(note.id)} className="mb-0.5 block w-full rounded-md px-2.5 py-2 text-left hover:bg-zinc-200/70 dark:hover:bg-zinc-800">
-                <span className="flex items-center gap-2 text-sm font-medium"><span className="truncate">{titles[note.id] ?? "Descifrando..."}</span>{note.pinned ? <FiStar className="shrink-0 fill-amber-400 text-amber-500" /> : null}</span>
-                <span className="mt-0.5 flex items-center gap-1.5 text-xs text-zinc-500">{note.isCritical ? <CriticalBadge /> : null}{note.hasExtraPassword ? <FiLock aria-label="Protegida" /> : null}{formatDate(note.updatedAt)}</span>
+                <span className="flex items-center gap-2 text-sm font-medium"><span className="truncate">{titles[note.id] ?? "Decrypting..."}</span>{note.pinned ? <FiStar className="shrink-0 fill-amber-400 text-amber-500" /> : null}</span>
+                <span className="mt-0.5 flex items-center gap-1.5 text-xs text-zinc-500">{note.isCritical ? <CriticalBadge /> : null}{note.hasExtraPassword ? <FiLock aria-label="Protected" /> : null}{formatDate(note.updatedAt)}</span>
               </button>
             ))}
           </div>
@@ -566,7 +565,7 @@ export function NotesDesktop({
         <section className="relative min-w-0 flex-1 overflow-hidden">
           <header className="absolute inset-x-0 top-0 z-20 flex h-12 items-center border-b border-zinc-200 bg-white/90 px-3 backdrop-blur lg:hidden dark:border-zinc-800 dark:bg-zinc-950/90">
             <button className="rounded-md p-2" onClick={() => setSidebarOpen(true)}><FiMenu /></button>
-            <span className="ml-2 text-sm font-medium">Escritorio de notas</span>
+            <span className="ml-2 text-sm font-medium">Notes desktop</span>
           </header>
           {error ? <div className="absolute top-3 right-3 z-[1000] rounded-lg bg-red-600 px-4 py-2 text-sm text-white shadow-lg">{error}<button className="ml-3" onClick={() => setError("")}><FiX /></button></div> : null}
           {!windows.length ? <DesktopEmpty onCreate={createNote} /> : null}
@@ -592,7 +591,7 @@ export function NotesDesktop({
             <div className="absolute inset-x-0 bottom-0 z-20 flex min-h-11 gap-1 overflow-x-auto border-t border-zinc-200 bg-white/90 p-1.5 pb-[max(0.375rem,env(safe-area-inset-bottom))] backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/90">
               {windows.map((noteWindow) => (
                 <button key={noteWindow.key} onClick={() => focusWindow(noteWindow.key)} className={`flex max-w-52 shrink-0 items-center gap-2 rounded-md px-3 py-1.5 text-xs ${noteWindow.minimized ? "bg-zinc-200 dark:bg-zinc-800" : "hover:bg-zinc-200 dark:hover:bg-zinc-800"}`}>
-                  <FiFileText /><span className="truncate">{noteWindow.title || "Sin título"}</span>
+                  <FiFileText /><span className="truncate">{noteWindow.title || "Untitled"}</span>
                 </button>
               ))}
             </div>
@@ -636,7 +635,7 @@ function AccountMenu({
             className="flex w-full items-center justify-center gap-2 rounded-lg border border-zinc-300 px-4 py-2 text-sm font-semibold hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
           >
             <FiSun />
-            Personalizar
+            Customize
             {customizeOpen ? <FiChevronUp /> : <FiChevronDown />}
           </button>
           {customizeOpen ? (
@@ -661,10 +660,10 @@ function AccountMenu({
                     <FiMonitor />
                   )}
                   {option === "light"
-                    ? "Claro"
+                    ? "Light"
                     : option === "dark"
-                      ? "Oscuro"
-                      : "Sistema"}
+                      ? "Dark"
+                      : "System"}
                 </button>
               ))}
             </div>
@@ -675,7 +674,7 @@ function AccountMenu({
             className="flex items-center justify-center gap-2 rounded-lg border border-zinc-300 px-4 py-2 text-sm font-semibold hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
           >
             <FiShield />
-            Seguridad
+            Security
           </Link>
           <LogoutButton />
         </div>
@@ -691,7 +690,7 @@ function AccountMenu({
           <FiUser />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block text-xs font-semibold">Cuenta</span>
+          <span className="block text-xs font-semibold">Account</span>
           <span className="block truncate text-[11px] text-zinc-500">
             {email}
           </span>
@@ -769,42 +768,42 @@ function NoteWindowView({
     >
       <div onPointerDown={onDrag} onDoubleClick={onMaximize} className="flex h-10 shrink-0 cursor-move items-center gap-2 border-b border-zinc-200 bg-zinc-100 px-2 dark:border-zinc-700 dark:bg-zinc-800">
         <FiFileText className="shrink-0 text-zinc-500" />
-        <span className="min-w-0 flex-1 truncate text-xs font-medium">{noteWindow.title || "Sin título"}</span>
+        <span className="min-w-0 flex-1 truncate text-xs font-medium">{noteWindow.title || "Untitled"}</span>
         <SyncDot status={noteWindow.sync} />
-        <WindowButton label="Minimizar" onClick={onMinimize}><FiMinus /></WindowButton>
-        <WindowButton label={noteWindow.maximized ? "Restaurar" : "Maximizar"} onClick={onMaximize}>{noteWindow.maximized ? <FiMinimize2 /> : <FiMaximize2 />}</WindowButton>
-        <WindowButton label="Cerrar" onClick={onClose}><FiX /></WindowButton>
+        <WindowButton label="Minimize" onClick={onMinimize}><FiMinus /></WindowButton>
+        <WindowButton label={noteWindow.maximized ? "Restore" : "Maximize"} onClick={onMaximize}>{noteWindow.maximized ? <FiMinimize2 /> : <FiMaximize2 />}</WindowButton>
+        <WindowButton label="Close" onClick={onClose}><FiX /></WindowButton>
       </div>
       {!noteWindow.minimized ? (
         <>
           <div className="flex h-12 shrink-0 items-center gap-2 border-b border-zinc-200 px-3 dark:border-zinc-800">
             {noteWindow.mode === "edit" ? (
-              <input value={noteWindow.title} onChange={(event) => onChange({ title: event.target.value })} placeholder="Sin título" className="min-w-0 flex-1 bg-transparent text-base font-semibold outline-none" />
-            ) : <h2 className="flex min-w-0 flex-1 items-center gap-2 truncate font-semibold">{noteWindow.encrypted?.isCritical ? <CriticalBadge /> : null}<span className="truncate">{noteWindow.title || "Sin título"}</span></h2>}
-            <button type="button" onClick={() => onMode(noteWindow.mode === "preview" ? "edit" : "preview")} className="flex items-center gap-2 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white"><FiEdit3 />{noteWindow.mode === "preview" ? "Editar" : "Preview"}</button>
+              <input value={noteWindow.title} onChange={(event) => onChange({ title: event.target.value })} placeholder="Untitled" className="min-w-0 flex-1 bg-transparent text-base font-semibold outline-none" />
+            ) : <h2 className="flex min-w-0 flex-1 items-center gap-2 truncate font-semibold">{noteWindow.encrypted?.isCritical ? <CriticalBadge /> : null}<span className="truncate">{noteWindow.title || "Untitled"}</span></h2>}
+            <button type="button" onClick={() => onMode(noteWindow.mode === "preview" ? "edit" : "preview")} className="flex items-center gap-2 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white"><FiEdit3 />{noteWindow.mode === "preview" ? "Edit" : "Preview"}</button>
             <button
               type="button"
-              aria-label="Copiar contenido Markdown"
-              title="Copiar contenido Markdown"
+              aria-label="Copy Markdown content"
+              title="Copy Markdown content"
               onClick={() => void copyMarkdown()}
               className="flex items-center gap-2 rounded-md border border-zinc-300 px-2.5 py-1.5 text-xs font-semibold hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
             >
               {copied ? <FiCheck className="text-emerald-500" /> : <FiCopy />}
-              <span className="hidden sm:inline">{copied ? "Copiado" : "Copiar"}</span>
+              <span className="hidden sm:inline">{copied ? "Copied" : "Copy"}</span>
             </button>
             <div className="relative">
-              <button aria-label="Más opciones" onClick={() => setMenu((current) => !current)} className="rounded-md border border-zinc-300 p-2 dark:border-zinc-700"><FiMoreHorizontal /></button>
+              <button aria-label="More options" onClick={() => setMenu((current) => !current)} className="rounded-md border border-zinc-300 p-2 dark:border-zinc-700"><FiMoreHorizontal /></button>
               {menu ? <NoteMenu noteWindow={noteWindow} working={working} onChange={onChange} onDelete={onDelete} onProtection={onProtection} onCritical={onCritical} onClose={() => setMenu(false)} /> : null}
             </div>
           </div>
           <div className="min-h-0 flex-1 overflow-auto">
             {noteWindow.mode === "edit" ? (
               <div data-color-mode={document.documentElement.classList.contains("dark") ? "dark" : "light"} className="h-full">
-                <MDEditor value={noteWindow.content} onChange={(value) => onChange({ content: value ?? "" })} preview="edit" height="100%" visibleDragbar={false} textareaProps={{ placeholder: "Escribe en Markdown..." }} className="!rounded-none !border-0 !shadow-none" />
+                <MDEditor value={noteWindow.content} onChange={(value) => onChange({ content: value ?? "" })} preview="edit" height="100%" visibleDragbar={false} textareaProps={{ placeholder: "Write in Markdown..." }} className="!rounded-none !border-0 !shadow-none" />
               </div>
             ) : (
               <div className="min-h-full bg-white p-6 dark:bg-[#0d1117]">
-                <MDEditor.Markdown source={noteWindow.content || "*Esta nota no tiene contenido.*"} rehypePlugins={[[rehypeSanitize]]} />
+                <MDEditor.Markdown source={noteWindow.content || "*This note has no content.*"} rehypePlugins={[[rehypeSanitize]]} />
               </div>
             )}
           </div>
@@ -826,16 +825,16 @@ function NoteMenu({ noteWindow, working, onChange, onDelete, onProtection, onCri
   const action = (run: () => void) => { run(); onClose(); };
   return (
     <div className="absolute top-11 right-0 z-[1100] w-56 rounded-lg border border-zinc-200 bg-white p-1 shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
-      <MenuButton icon={<FiStar />} label={noteWindow.pinned ? "Desfijar" : "Fijar"} onClick={() => action(() => onChange({ pinned: !noteWindow.pinned }))} />
-      <MenuButton icon={<FiArchive />} label={noteWindow.archived ? "Desarchivar" : "Archivar"} onClick={() => action(() => onChange({ archived: !noteWindow.archived }))} />
-      {noteWindow.encrypted ? <MenuButton icon={<FiAlertTriangle />} label={noteWindow.encrypted.isCritical ? "Quitar modo crítico" : "Marcar como crítica"} disabled={working} onClick={() => action(() => onCritical(!noteWindow.encrypted!.isCritical))} /> : null}
+      <MenuButton icon={<FiStar />} label={noteWindow.pinned ? "Unpin" : "Pin"} onClick={() => action(() => onChange({ pinned: !noteWindow.pinned }))} />
+      <MenuButton icon={<FiArchive />} label={noteWindow.archived ? "Unarchive" : "Archive"} onClick={() => action(() => onChange({ archived: !noteWindow.archived }))} />
+      {noteWindow.encrypted ? <MenuButton icon={<FiAlertTriangle />} label={noteWindow.encrypted.isCritical ? "Remove critical mode" : "Mark as critical"} disabled={working} onClick={() => action(() => onCritical(!noteWindow.encrypted!.isCritical))} /> : null}
       {noteWindow.encrypted ? noteWindow.encrypted.hasExtraPassword ? (
         <>
-          <MenuButton icon={<FiKey />} label="Cambiar contraseña" disabled={working} onClick={() => action(() => onProtection("change"))} />
-          <MenuButton icon={<FiUnlock />} label="Quitar protección" disabled={working} onClick={() => action(() => onProtection("remove"))} />
+          <MenuButton icon={<FiKey />} label="Change password" disabled={working} onClick={() => action(() => onProtection("change"))} />
+          <MenuButton icon={<FiUnlock />} label="Remove protection" disabled={working} onClick={() => action(() => onProtection("remove"))} />
         </>
-      ) : <MenuButton icon={<FiShield />} label="Proteger nota" disabled={working} onClick={() => action(() => onProtection("protect"))} /> : null}
-      {noteWindow.encrypted ? <MenuButton danger icon={<FiTrash2 />} label="Eliminar" disabled={working} onClick={() => action(onDelete)} /> : null}
+      ) : <MenuButton icon={<FiShield />} label="Protect note" disabled={working} onClick={() => action(() => onProtection("protect"))} /> : null}
+      {noteWindow.encrypted ? <MenuButton danger icon={<FiTrash2 />} label="Delete" disabled={working} onClick={() => action(onDelete)} /> : null}
     </div>
   );
 }
@@ -854,11 +853,11 @@ function PasswordDialog({ action, working, onCancel, onSubmit }: {
   return (
     <div className="fixed inset-0 z-[2000] grid place-items-center bg-black/60 p-4">
       <form onSubmit={(event) => { event.preventDefault(); if (!needsNew || next === confirmation) void onSubmit(current, next); }} className="w-full max-w-md space-y-4 rounded-xl bg-white p-6 shadow-2xl dark:bg-zinc-900">
-        <h2 className="text-lg font-semibold">{action.mode === "open" ? "Abrir nota protegida" : action.mode === "protect" ? "Proteger nota" : action.mode === "change" ? "Cambiar contraseña" : "Quitar protección"}</h2>
-        <p className="text-sm text-zinc-500">Esta contraseña nunca se envía al servidor y no puede recuperarse.</p>
-        {needsCurrent ? <PasswordInput label="Contraseña actual" value={current} onChange={setCurrent} /> : null}
-        {needsNew ? <><PasswordInput label="Nueva contraseña" value={next} onChange={setNext} /><PasswordInput label="Confirmar contraseña" value={confirmation} onChange={setConfirmation} /></> : null}
-        <div className="flex justify-end gap-2"><button type="button" onClick={onCancel} className="rounded-lg border border-zinc-300 px-4 py-2 text-sm dark:border-zinc-700">Cancelar</button><button disabled={working || (needsCurrent && !current) || (needsNew && (!next || next !== confirmation))} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Continuar</button></div>
+        <h2 className="text-lg font-semibold">{action.mode === "open" ? "Open protected note" : action.mode === "protect" ? "Protect note" : action.mode === "change" ? "Change password" : "Remove protection"}</h2>
+        <p className="text-sm text-zinc-500">This password is never sent to the server and cannot be recovered.</p>
+        {needsCurrent ? <PasswordInput label="Current password" value={current} onChange={setCurrent} /> : null}
+        {needsNew ? <><PasswordInput label="New password" value={next} onChange={setNext} /><PasswordInput label="Confirm password" value={confirmation} onChange={setConfirmation} /></> : null}
+        <div className="flex justify-end gap-2"><button type="button" onClick={onCancel} className="rounded-lg border border-zinc-300 px-4 py-2 text-sm dark:border-zinc-700">Cancel</button><button disabled={working || (needsCurrent && !current) || (needsNew && (!next || next !== confirmation))} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Continue</button></div>
       </form>
     </div>
   );
@@ -886,11 +885,11 @@ function SyncDot({ status }: { status: SyncStatus }) {
 }
 
 function CriticalBadge() {
-  return <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-500/15 dark:text-amber-300"><FiAlertTriangle />Crítica</span>;
+  return <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-500/15 dark:text-amber-300"><FiAlertTriangle />Critical</span>;
 }
 
 function DesktopEmpty({ onCreate }: { onCreate: () => void }) {
-  return <div className="grid h-full place-items-center pb-11 text-center"><div><div className="mx-auto grid h-12 w-12 place-items-center rounded-xl bg-zinc-200 text-xl dark:bg-zinc-900"><FiFileText /></div><h2 className="mt-4 text-lg font-semibold">Tu espacio de notas</h2><p className="mt-1 text-sm text-zinc-500">Abre varias notas y organízalas como ventanas.</p><button onClick={onCreate} className="mt-5 inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white"><FiPlus /> Nueva nota</button></div></div>;
+  return <div className="grid h-full place-items-center pb-11 text-center"><div><div className="mx-auto grid h-12 w-12 place-items-center rounded-xl bg-zinc-200 text-xl dark:bg-zinc-900"><FiFileText /></div><h2 className="mt-4 text-lg font-semibold">Your notes workspace</h2><p className="mt-1 text-sm text-zinc-500">Open multiple notes and arrange them as windows.</p><button onClick={onCreate} className="mt-5 inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white"><FiPlus /> New note</button></div></div>;
 }
 
 function FullMessage({ children }: { children: ReactNode }) {
@@ -898,13 +897,13 @@ function FullMessage({ children }: { children: ReactNode }) {
 }
 
 function formatDate(value: string) {
-  return new Intl.DateTimeFormat("es-MX", { month: "short", day: "numeric" }).format(new Date(value));
+  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(new Date(value));
 }
 
 function themeLabel(theme: ThemePreference) {
   return theme === "light"
-    ? "Tema claro"
+    ? "Light theme"
     : theme === "dark"
-      ? "Tema oscuro"
-      : "Usar tema del sistema";
+      ? "Dark theme"
+      : "Use system theme";
 }

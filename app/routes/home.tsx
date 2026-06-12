@@ -5,8 +5,8 @@ import { getAuthenticatedUser } from "~/lib/auth/session.server";
 
 export function meta({}: Route.MetaArgs) {
   return [
-    { title: "Notas privadas" },
-    { name: "description", content: "Tus notas privadas." },
+    { title: "Notes" },
+    { name: "description", content: "Your private notes." },
   ];
 }
 

@@ -14,7 +14,7 @@ export function SecurityLayout({
     <main className="min-h-screen bg-zinc-50 px-4 py-10 dark:bg-zinc-950">
       <section className="mx-auto max-w-2xl">
         <Link className="text-sm font-medium text-blue-600" to="/app">
-          Volver a notas
+          Back to notes
         </Link>
         <header className="mt-6 mb-8">
           <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>

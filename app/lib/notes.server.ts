@@ -79,7 +79,7 @@ const encryptedNoteSchema = z
     ) {
       context.addIssue({
         code: "custom",
-        message: "Protección adicional inválida.",
+        message: "Invalid additional protection.",
       });
     }
   });
@@ -87,7 +87,7 @@ const encryptedNoteSchema = z
 export function parseEncryptedNoteInput(value: unknown): EncryptedNoteInput {
   const parsed = encryptedNoteSchema.safeParse(value);
   if (!parsed.success) {
-    throw new Response("Payload cifrado inválido.", { status: 400 });
+    throw new Response("Invalid encrypted payload.", { status: 400 });
   }
   return parsed.data;
 }
@@ -156,7 +156,7 @@ export async function createEncryptedNote(
   const note = await collection.findOne({ _id: result.insertedId, userId });
 
   if (!note) {
-    throw new Response("No fue posible crear la nota.", { status: 500 });
+    throw new Response("The note could not be created.", { status: 500 });
   }
 
   return serializeNote(note);

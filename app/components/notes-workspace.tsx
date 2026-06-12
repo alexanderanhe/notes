@@ -13,7 +13,6 @@ import {
 } from "react";
 import {
   FiArchive,
-  FiBookOpen,
   FiCommand,
   FiFileText,
   FiFolder,
@@ -227,7 +226,7 @@ export function NotesWorkspace({ email }: { email: string }) {
       encryptedNotes.map(async (note) => [
         note.id,
         note.hasExtraPassword
-          ? "Nota protegida"
+          ? "Protected note"
           : await decryptNoteTitle(note, key),
       ] as const),
     );
@@ -239,7 +238,7 @@ export function NotesWorkspace({ email }: { email: string }) {
   }, [editor]);
 
   useEffect(() => {
-    loadNotes().catch(() => setError("No fue posible cargar las notas."));
+    loadNotes().catch(() => setError("Notes could not be loaded."));
   }, [loadNotes]);
 
   useEffect(() => {
@@ -315,8 +314,8 @@ export function NotesWorkspace({ email }: { email: string }) {
       setTitles((current) => ({
         ...current,
         [note.id]: note.hasExtraPassword
-          ? "Nota protegida"
-          : snapshot.title || "Sin título",
+          ? "Protected note"
+          : snapshot.title || "Untitled",
       }));
       updateSearchIndex({
         id: note.id,
@@ -338,7 +337,7 @@ export function NotesWorkspace({ email }: { email: string }) {
       });
     } catch {
       setSyncStatus("error");
-      setError("No fue posible sincronizar la nota.");
+      setError("The note could not be synced.");
     } finally {
       saveInFlightRef.current = false;
       if (queuedSaveRef.current) {
@@ -392,7 +391,7 @@ export function NotesWorkspace({ email }: { email: string }) {
   useEffect(() => {
     if (!masterKey) return;
     decryptTitles(notes, masterKey).catch(() =>
-      setError("No fue posible descifrar los títulos."),
+      setError("Note titles could not be decrypted."),
     );
   }, [decryptTitles, masterKey, notes]);
 
@@ -448,7 +447,7 @@ export function NotesWorkspace({ email }: { email: string }) {
         });
       })
       .catch(() => {
-        if (!cancelled) setError("No fue posible crear el índice local de búsqueda.");
+        if (!cancelled) setError("The local search index could not be created.");
       })
       .finally(() => {
         if (!cancelled) setIndexing(false);
@@ -495,7 +494,7 @@ export function NotesWorkspace({ email }: { email: string }) {
       setSyncStatus("saved");
       setMobilePane("edit");
     } catch {
-      setError("No fue posible abrir la nota.");
+      setError("The note could not be opened.");
     } finally {
       setWorking(false);
     }
@@ -588,7 +587,7 @@ export function NotesWorkspace({ email }: { email: string }) {
       editorRef.current = null;
       setSyncStatus("idle");
     } catch {
-      setError("No fue posible eliminar la nota.");
+      setError("The note could not be deleted.");
     } finally {
       setWorking(false);
     }
@@ -614,8 +613,8 @@ export function NotesWorkspace({ email }: { email: string }) {
     setTitles((current) => ({
       ...current,
       [note.id]: note.hasExtraPassword
-        ? "Nota protegida"
-        : snapshot.title || "Sin título",
+        ? "Protected note"
+        : snapshot.title || "Untitled",
     }));
     updateSearchIndex({
       id: note.id,
@@ -671,7 +670,7 @@ export function NotesWorkspace({ email }: { email: string }) {
         await saveRef.current();
         const snapshot = editorRef.current;
         if (!snapshot?.encrypted) {
-          throw new Error("Guarda la nota antes de protegerla.");
+          throw new Error("Save the note before protecting it.");
         }
         if (passwordAction.mode === "protect") {
           const result = await protectNote(
@@ -700,8 +699,8 @@ export function NotesWorkspace({ email }: { email: string }) {
     } catch {
       setError(
         passwordAction.mode === "open"
-          ? "Contraseña adicional incorrecta o nota dañada."
-          : "No fue posible actualizar la protección. Verifica la contraseña.",
+          ? "Incorrect additional password or damaged note."
+          : "Protection could not be updated. Check the password.",
       );
     } finally {
       setWorking(false);
@@ -709,7 +708,7 @@ export function NotesWorkspace({ email }: { email: string }) {
   }
 
   if (loading || !unlocked) {
-    return <Message>Cargando bóveda cifrada...</Message>;
+    return <Message>Loading encrypted vault...</Message>;
   }
 
   return (
@@ -718,7 +717,7 @@ export function NotesWorkspace({ email }: { email: string }) {
         {sidebarOpen ? (
           <button
             type="button"
-            aria-label="Cerrar navegación"
+            aria-label="Close navigation"
             onClick={() => setSidebarOpen(false)}
             className="fixed inset-0 z-30 bg-black/30 lg:hidden"
           />
@@ -728,11 +727,9 @@ export function NotesWorkspace({ email }: { email: string }) {
           className={`${sidebarOpen ? "translate-x-0" : "-translate-x-full"} fixed inset-y-0 left-0 z-40 flex max-w-[88vw] shrink-0 flex-col border-r border-zinc-200 bg-zinc-50 transition-transform lg:static lg:max-w-none lg:translate-x-0 dark:border-zinc-800 dark:bg-zinc-900`}
         >
           <div className="flex items-center gap-3 px-4 py-4">
-            <div className="grid h-8 w-8 place-items-center rounded-lg bg-zinc-950 text-sm font-semibold text-white dark:bg-white dark:text-zinc-950">
-              <FiBookOpen aria-hidden />
-            </div>
+            <img src="/icon.svg" alt="" className="h-8 w-8 rounded-lg" />
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold">Notas privadas</p>
+              <p className="truncate text-sm font-semibold">Notes</p>
               <p className="truncate text-xs text-zinc-500">{email}</p>
             </div>
           </div>
@@ -740,7 +737,7 @@ export function NotesWorkspace({ email }: { email: string }) {
           <div className="space-y-1 px-2">
             <SidebarButton
               icon={<FiPlus aria-hidden />}
-              label="Nueva nota"
+              label="New note"
               shortcut="⌘N"
               onClick={() => void createNote()}
             />
@@ -752,12 +749,12 @@ export function NotesWorkspace({ email }: { email: string }) {
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 onFocus={() => setPaletteOpen(false)}
-                placeholder="Búsqueda rápida"
+                placeholder="Quick search"
                 className="w-full rounded-md border-0 bg-transparent py-2 pr-10 pl-8 text-sm outline-none placeholder:text-zinc-500 hover:bg-zinc-200/60 focus:bg-white focus:ring-1 focus:ring-zinc-300 dark:hover:bg-zinc-800/70 dark:focus:bg-zinc-950 dark:focus:ring-zinc-700"
               />
               <button
                 type="button"
-                title="Abrir command palette"
+                title="Open command palette"
                 onClick={() => setPaletteOpen(true)}
                 className="absolute inset-y-0 right-2 text-[10px] text-zinc-400"
               >
@@ -765,32 +762,32 @@ export function NotesWorkspace({ email }: { email: string }) {
               </button>
             </label>
             {indexing ? (
-              <p className="px-2.5 text-[11px] text-zinc-400">Indexando notas localmente...</p>
+              <p className="px-2.5 text-[11px] text-zinc-400">Indexing notes locally...</p>
             ) : null}
           </div>
 
-          <nav className="mt-5 space-y-1 px-2" aria-label="Filtros de notas">
+          <nav className="mt-5 space-y-1 px-2" aria-label="Note filters">
             <p className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
-              Espacio
+              Workspace
             </p>
             <SidebarButton
               active={filter === "all"}
               icon={<FiFolder aria-hidden />}
-              label="Todas las notas"
+              label="All notes"
               count={notes.filter((note) => !note.archived).length}
               onClick={() => selectFilter("all")}
             />
             <SidebarButton
               active={filter === "favorites"}
               icon={<FiStar aria-hidden />}
-              label="Favoritas"
+              label="Favorites"
               count={notes.filter((note) => note.pinned && !note.archived).length}
               onClick={() => selectFilter("favorites")}
             />
             <SidebarButton
               active={filter === "archived"}
               icon={<FiArchive aria-hidden />}
-              label="Archivadas"
+              label="Archived"
               count={notes.filter((note) => note.archived).length}
               onClick={() => selectFilter("archived")}
             />
@@ -800,10 +797,10 @@ export function NotesWorkspace({ email }: { email: string }) {
             <div className="px-4 pb-2">
               <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
                 {filter === "all"
-                  ? "Notas"
+                  ? "Notes"
                   : filter === "favorites"
-                    ? "Favoritas"
-                    : "Archivadas"}
+                    ? "Favorites"
+                    : "Archived"}
               </p>
             </div>
             <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 pb-3">
@@ -826,18 +823,18 @@ export function NotesWorkspace({ email }: { email: string }) {
                       <HighlightText
                         text={
                           query.trim() && sidebarSearchResults.get(note.id)
-                            ? sidebarSearchResults.get(note.id)!.title || "Sin título"
+                            ? sidebarSearchResults.get(note.id)!.title || "Untitled"
                             : titles[note.id] === undefined
-                            ? "Descifrando..."
-                            : titles[note.id] || "Sin título"
+                            ? "Decrypting..."
+                            : titles[note.id] || "Untitled"
                         }
                         query={query}
                       />
                     </span>
-                    {note.pinned ? <FiStar className="shrink-0 fill-amber-400 text-amber-500" aria-label="Favorita" /> : null}
+                    {note.pinned ? <FiStar className="shrink-0 fill-amber-400 text-amber-500" aria-label="Favorite" /> : null}
                   </span>
                   <span className="mt-0.5 block truncate text-xs text-zinc-500">
-                    {note.hasExtraPassword ? <FiLock className="mr-1 inline" aria-label="Protegida" /> : null}
+                    {note.hasExtraPassword ? <FiLock className="mr-1 inline" aria-label="Protected" /> : null}
                     {query.trim() && sidebarSearchResults.get(note.id)?.snippet ? (
                       <HighlightText
                         text={sidebarSearchResults.get(note.id)!.snippet}
@@ -852,8 +849,8 @@ export function NotesWorkspace({ email }: { email: string }) {
               {!filteredNotes.length ? (
                 <p className="px-2.5 py-3 text-xs text-zinc-500">
                   {query.trim()
-                    ? "Sin resultados locales. Las notas protegidas requieren desbloqueo."
-                    : "No hay notas en esta sección."}
+                    ? "No local results. Protected notes require unlocking."
+                    : "There are no notes in this section."}
                 </p>
               ) : null}
             </div>
@@ -865,7 +862,7 @@ export function NotesWorkspace({ email }: { email: string }) {
               className="mb-2 flex w-full items-center justify-center gap-2 rounded-lg border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
             >
               <FiShield aria-hidden />
-              Seguridad
+              Security
             </Link>
             <div className="mb-2 grid grid-cols-3 gap-1 rounded-lg bg-zinc-200/70 p-1 dark:bg-zinc-800">
               {(["light", "dark", "system"] as const).map((option) => (
@@ -882,7 +879,7 @@ export function NotesWorkspace({ email }: { email: string }) {
                 >
                   <span className="flex items-center justify-center gap-1.5">
                     {option === "light" ? <FiSun aria-hidden /> : option === "dark" ? <FiMoon aria-hidden /> : <FiMonitor aria-hidden />}
-                    <span className="hidden 2xl:inline">{option === "light" ? "Claro" : option === "dark" ? "Oscuro" : "Auto"}</span>
+                    <span className="hidden 2xl:inline">{option === "light" ? "Light" : option === "dark" ? "Dark" : "Auto"}</span>
                   </span>
                 </button>
               ))}
@@ -902,7 +899,7 @@ export function NotesWorkspace({ email }: { email: string }) {
           <header className="flex h-14 shrink-0 items-center gap-3 border-b border-zinc-200 px-3 sm:px-5 dark:border-zinc-800">
             <button
               type="button"
-              aria-label="Abrir navegación"
+              aria-label="Open navigation"
               onClick={() => setSidebarOpen(true)}
               className="rounded-md p-2 hover:bg-zinc-100 lg:hidden dark:hover:bg-zinc-800"
             >
@@ -910,7 +907,7 @@ export function NotesWorkspace({ email }: { email: string }) {
             </button>
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium">
-                {editor ? editor.title || "Sin título" : "Todas las notas"}
+                {editor ? editor.title || "Untitled" : "All notes"}
               </p>
             </div>
             <button
@@ -918,7 +915,7 @@ export function NotesWorkspace({ email }: { email: string }) {
               onClick={() => setPaletteOpen(true)}
               className="hidden items-center gap-2 rounded-md border border-zinc-200 px-2.5 py-1.5 text-xs text-zinc-500 hover:bg-zinc-50 sm:flex dark:border-zinc-800 dark:hover:bg-zinc-900"
             >
-              <FiSearch aria-hidden /> Buscar <kbd className="rounded bg-zinc-100 px-1.5 py-0.5 dark:bg-zinc-800">⌘K</kbd>
+              <FiSearch aria-hidden /> Search <kbd className="rounded bg-zinc-100 px-1.5 py-0.5 dark:bg-zinc-800">⌘K</kbd>
             </button>
             {editor ? (
               <SyncIndicator status={syncStatus} updatedAt={editor.encrypted?.updatedAt} compact />
@@ -940,7 +937,7 @@ export function NotesWorkspace({ email }: { email: string }) {
               <input
                 value={editor.title}
                 onChange={(event) => markEditorChanged({ title: event.target.value })}
-                placeholder="Sin título"
+                placeholder="Untitled"
                 className="min-w-0 flex-1 border-0 bg-transparent px-0 py-2 text-2xl font-semibold tracking-tight outline-none placeholder:text-zinc-300 dark:placeholder:text-zinc-700"
               />
             </div>
@@ -973,7 +970,7 @@ export function NotesWorkspace({ email }: { email: string }) {
                   preview="edit"
                   height="100%"
                   visibleDragbar={false}
-                  textareaProps={{ placeholder: "Escribe en Markdown..." }}
+                  textareaProps={{ placeholder: "Write in Markdown..." }}
                   className="!rounded-none !border-0 !shadow-none"
                 />
               </div>
@@ -981,7 +978,7 @@ export function NotesWorkspace({ email }: { email: string }) {
                 className={`${mobilePane === "preview" ? "block" : "hidden"} min-w-0 overflow-auto border-zinc-200 bg-white p-5 md:block md:border-l dark:border-zinc-800 dark:bg-[#0d1117]`}
               >
                 <MDEditor.Markdown
-                  source={editor.content || "*La preview aparecerá aquí.*"}
+                  source={editor.content || "*The preview will appear here.*"}
                   rehypePlugins={[[rehypeSanitize]]}
                 />
               </div>
@@ -997,7 +994,7 @@ export function NotesWorkspace({ email }: { email: string }) {
                       markEditorChanged({ pinned: event.target.checked })
                     }
                   />
-                  Fijada
+                  Pinned
                 </label>
                 <label className="flex items-center gap-2">
                   <input
@@ -1007,7 +1004,7 @@ export function NotesWorkspace({ email }: { email: string }) {
                       markEditorChanged({ archived: event.target.checked })
                     }
                   />
-                  Archivada
+                  Archived
                 </label>
               </div>
               <div className="flex gap-2">
@@ -1020,7 +1017,7 @@ export function NotesWorkspace({ email }: { email: string }) {
                         onClick={() => setPasswordAction({ mode: "change" })}
                         className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-semibold dark:border-zinc-700"
                       >
-                        <span className="flex items-center gap-2"><FiKey aria-hidden /> Cambiar contraseña</span>
+                        <span className="flex items-center gap-2"><FiKey aria-hidden /> Change password</span>
                       </button>
                       <button
                         type="button"
@@ -1028,7 +1025,7 @@ export function NotesWorkspace({ email }: { email: string }) {
                         onClick={() => setPasswordAction({ mode: "remove" })}
                         className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-semibold dark:border-zinc-700"
                       >
-                        <span className="flex items-center gap-2"><FiUnlock aria-hidden /> Quitar protección</span>
+                        <span className="flex items-center gap-2"><FiUnlock aria-hidden /> Remove protection</span>
                       </button>
                     </>
                   ) : (
@@ -1038,12 +1035,12 @@ export function NotesWorkspace({ email }: { email: string }) {
                       onClick={() => setPasswordAction({ mode: "protect" })}
                       className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-semibold dark:border-zinc-700"
                     >
-                      <span className="flex items-center gap-2"><FiShield aria-hidden /> Proteger nota</span>
+                      <span className="flex items-center gap-2"><FiShield aria-hidden /> Protect note</span>
                     </button>
                   )
                 ) : null}
                 <PrimaryButton disabled={syncStatus === "saving"}>
-                  <span className="flex items-center gap-2"><FiSave aria-hidden /> Guardar</span>
+                  <span className="flex items-center gap-2"><FiSave aria-hidden /> Save</span>
                 </PrimaryButton>
                 {editor.encrypted ? (
                   <button
@@ -1052,21 +1049,21 @@ export function NotesWorkspace({ email }: { email: string }) {
                     onClick={deleteNote}
                     className="rounded-lg border border-red-300 px-4 py-2 text-sm font-semibold text-red-700 dark:border-red-900 dark:text-red-300"
                   >
-                    <span className="flex items-center gap-2"><FiTrash2 aria-hidden /> Eliminar</span>
+                    <span className="flex items-center gap-2"><FiTrash2 aria-hidden /> Delete</span>
                   </button>
                 ) : null}
               </div>
             </div>
-            <p className="text-xs text-zinc-500">Autosave activo · Ctrl/Cmd + S para guardar</p>
+            <p className="text-xs text-zinc-500">Autosave enabled · Ctrl/Cmd + S to save</p>
           </form>
         ) : (
           <div className="grid min-h-[70dvh] place-items-center text-center">
             <div>
               <div className="mx-auto grid h-12 w-12 place-items-center rounded-xl bg-zinc-100 text-xl dark:bg-zinc-900"><FiFileText aria-hidden /></div>
-              <h2 className="mt-4 text-lg font-semibold">Tu espacio de notas</h2>
-              <p className="mt-1 text-sm text-zinc-500">Selecciona una nota o crea una nueva.</p>
+              <h2 className="mt-4 text-lg font-semibold">Your notes workspace</h2>
+              <p className="mt-1 text-sm text-zinc-500">Select a note or create a new one.</p>
               <PrimaryButton type="button" onClick={createNote} className="mt-5">
-                <span className="flex items-center gap-2"><FiPlus aria-hidden /> Nueva nota</span>
+                <span className="flex items-center gap-2"><FiPlus aria-hidden /> New note</span>
               </PrimaryButton>
             </div>
           </div>
@@ -1198,7 +1195,7 @@ function CommandPalette({
                 run(() => onOpen(matchingNotes[0].id));
               }
             }}
-            placeholder="Buscar notas o ejecutar un comando..."
+            placeholder="Search notes or run a command..."
             className="min-w-0 flex-1 bg-transparent py-4 text-sm outline-none"
           />
           <kbd className="rounded border border-zinc-200 px-1.5 py-0.5 text-[10px] text-zinc-400 dark:border-zinc-700">
@@ -1208,31 +1205,31 @@ function CommandPalette({
         <div className="max-h-[60dvh] overflow-y-auto p-2">
           {!normalized ? (
             <>
-              <PaletteLabel>Acciones</PaletteLabel>
-              <PaletteButton icon={<FiPlus />} label="Nueva nota" detail="⌘N" onClick={() => run(onCreate)} />
-              <PaletteButton icon={<FiFolder />} label="Todas las notas" onClick={() => run(() => onFilter("all"))} />
-              <PaletteButton icon={<FiStar />} label="Favoritas" onClick={() => run(() => onFilter("favorites"))} />
-              <PaletteButton icon={<FiArchive />} label="Archivadas" onClick={() => run(() => onFilter("archived"))} />
-              <PaletteLabel>Apariencia</PaletteLabel>
+              <PaletteLabel>Actions</PaletteLabel>
+              <PaletteButton icon={<FiPlus />} label="New note" detail="⌘N" onClick={() => run(onCreate)} />
+              <PaletteButton icon={<FiFolder />} label="All notes" onClick={() => run(() => onFilter("all"))} />
+              <PaletteButton icon={<FiStar />} label="Favorites" onClick={() => run(() => onFilter("favorites"))} />
+              <PaletteButton icon={<FiArchive />} label="Archived" onClick={() => run(() => onFilter("archived"))} />
+              <PaletteLabel>Appearance</PaletteLabel>
               {(["light", "dark", "system"] as const).map((option) => (
                 <PaletteButton
                   key={option}
                   icon={option === "light" ? <FiSun /> : option === "dark" ? <FiMoon /> : <FiMonitor />}
                   label={themeLabel(option)}
-                  detail={theme === option ? "Activo" : undefined}
+                  detail={theme === option ? "Active" : undefined}
                   onClick={() => run(() => onTheme(option))}
                 />
               ))}
             </>
           ) : null}
           {matchingNotes.length ? (
-            <PaletteLabel>{normalized ? "Resultados locales" : "Notas recientes en memoria"}</PaletteLabel>
+            <PaletteLabel>{normalized ? "Local results" : "Recent notes in memory"}</PaletteLabel>
           ) : null}
           {matchingNotes.map((result) => (
             <PaletteButton
               key={result.id}
               icon={noteById.get(result.id)?.hasExtraPassword ? <FiLock /> : <FiFileText />}
-              label={<HighlightText text={result.title || "Sin título"} query={value} />}
+              label={<HighlightText text={result.title || "Untitled"} query={value} />}
               description={<HighlightText text={result.snippet} query={value} />}
               detail={formatCompactDate(result.updatedAt)}
               onClick={() => run(() => onOpen(result.id))}
@@ -1240,7 +1237,7 @@ function CommandPalette({
           ))}
           {normalized && !matchingNotes.length ? (
             <p className="px-3 py-8 text-center text-sm text-zinc-500">
-              {indexing ? "Creando índice local..." : "No se encontraron notas."}
+              {indexing ? "Creating local index..." : "No notes found."}
             </p>
           ) : null}
         </div>
@@ -1326,10 +1323,10 @@ function ExtraPasswordDialog({
   const needsNewPassword = action.mode === "protect" || action.mode === "change";
   const needsCurrentPassword = action.mode !== "protect";
   const title = {
-    open: "Abrir nota protegida",
-    protect: "Proteger nota",
-    change: "Cambiar contraseña adicional",
-    remove: "Quitar protección adicional",
+    open: "Open protected note",
+    protect: "Protect note",
+    change: "Change additional password",
+    remove: "Remove additional protection",
   }[action.mode];
 
   return (
@@ -1345,7 +1342,7 @@ function ExtraPasswordDialog({
         <div>
           <h2 className="text-lg font-semibold">{title}</h2>
           <p className="mt-1 text-sm text-zinc-500">
-            Esta contraseña nunca se envía al servidor y no puede recuperarse.
+            This password is never sent to the server and cannot be recovered.
           </p>
         </div>
         <ErrorMessage message={error} />
@@ -1353,8 +1350,8 @@ function ExtraPasswordDialog({
           <PasswordField
             label={
               action.mode === "open"
-                ? "Contraseña adicional"
-                : "Contraseña adicional actual"
+                ? "Additional password"
+                : "Current additional password"
             }
             value={currentPassword}
             onChange={setCurrentPassword}
@@ -1363,17 +1360,17 @@ function ExtraPasswordDialog({
         {needsNewPassword ? (
           <>
             <PasswordField
-              label="Nueva contraseña adicional"
+              label="New additional password"
               value={newPassword}
               onChange={setNewPassword}
             />
             <PasswordField
-              label="Confirmar contraseña"
+              label="Confirm password"
               value={confirmation}
               onChange={setConfirmation}
             />
             {confirmation && newPassword !== confirmation ? (
-              <p className="text-sm text-red-600">Las contraseñas no coinciden.</p>
+              <p className="text-sm text-red-600">Passwords do not match.</p>
             ) : null}
           </>
         ) : null}
@@ -1384,7 +1381,7 @@ function ExtraPasswordDialog({
             onClick={onCancel}
             className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-semibold dark:border-zinc-700"
           >
-            Cancelar
+            Cancel
           </button>
           <PrimaryButton
             disabled={
@@ -1394,7 +1391,7 @@ function ExtraPasswordDialog({
                 (!newPassword || newPassword !== confirmation))
             }
           >
-            {working ? "Procesando..." : "Continuar"}
+            {working ? "Processing..." : "Continue"}
           </PrimaryButton>
         </div>
       </form>
@@ -1436,10 +1433,10 @@ function SyncIndicator({
   compact?: boolean;
 }) {
   const labels: Record<SyncStatus, string> = {
-    idle: "Cambios sin guardar",
-    saving: "Guardando...",
-    saved: "Guardado",
-    error: "Error al guardar",
+    idle: "Unsaved changes",
+    saving: "Saving...",
+    saved: "Saved",
+    error: "Save error",
   };
   const colors: Record<SyncStatus, string> = {
     idle: "bg-amber-500",
@@ -1455,21 +1452,21 @@ function SyncIndicator({
         <span className={compact ? "hidden sm:inline" : undefined}>{labels[status]}</span>
       </div>
       <div className={compact ? "hidden" : "mt-1"}>
-        {updatedAt ? `Modificada ${formatModifiedDate(updatedAt)}` : "Nota nueva"}
+        {updatedAt ? `Modified ${formatModifiedDate(updatedAt)}` : "New note"}
       </div>
     </div>
   );
 }
 
 function formatModifiedDate(value: string) {
-  return new Intl.DateTimeFormat("es-MX", {
+  return new Intl.DateTimeFormat("en-US", {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value));
 }
 
 function formatCompactDate(value: string) {
-  return new Intl.DateTimeFormat("es-MX", {
+  return new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
   }).format(new Date(value));
@@ -1477,10 +1474,10 @@ function formatCompactDate(value: string) {
 
 function themeLabel(theme: ThemePreference) {
   return theme === "light"
-    ? "Tema claro"
+    ? "Light theme"
     : theme === "dark"
-      ? "Tema oscuro"
-      : "Usar tema del sistema";
+      ? "Dark theme"
+      : "Use system theme";
 }
 
 function PaneButton({

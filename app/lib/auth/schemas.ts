@@ -6,29 +6,29 @@ export const emailSchema = z
   .string()
   .trim()
   .toLowerCase()
-  .email("Ingresa un correo válido.")
-  .max(254, "Ingresa un correo válido.");
+  .email("Enter a valid email.")
+  .max(254, "Enter a valid email.");
 
 export const passwordSchema = z
   .string()
-  .min(8, "La contraseña debe tener al menos 8 caracteres.")
-  .max(72, "La contraseña no puede superar 72 caracteres.");
+  .min(8, "The password must be at least 8 characters.")
+  .max(72, "The password cannot exceed 72 characters.");
 
 export const verificationCodeSchema = z
   .string()
   .trim()
-  .regex(/^\d{6}$/, "Ingresa un código válido.");
+  .regex(/^\d{6}$/, "Enter a valid code.");
 
 export const totpCodeSchema = z
   .string()
   .trim()
-  .regex(/^\d{6}$/, "Ingresa un código de 6 dígitos.");
+  .regex(/^\d{6}$/, "Enter a 6-digit code.");
 
 export const backupCodeSchema = z
   .string()
   .trim()
   .toUpperCase()
-  .regex(/^[A-Z2-9]{4}-[A-Z2-9]{4}$/, "Ingresa un código de respaldo válido.");
+  .regex(/^[A-Z2-9]{4}-[A-Z2-9]{4}$/, "Enter a valid backup code.");
 
 export const twoFactorVerifySchema = z.object({
   code: z.union([totpCodeSchema, backupCodeSchema]),
@@ -48,7 +48,7 @@ export const themePreferenceSchema = z.object({
 
 export const vaultEnvelopeSchema = z.custom<ReturnType<typeof parseVaultFields>>(
   isVaultEnvelope,
-  "Envelope de bóveda inválido.",
+  "Invalid vault envelope.",
 );
 
 export function parseVaultFields(formData: FormData) {

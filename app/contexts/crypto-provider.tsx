@@ -27,7 +27,7 @@ export function useCrypto() {
   const context = useContext(CryptoContext);
 
   if (!context) {
-    throw new Error("useCrypto debe usarse dentro de CryptoProvider.");
+    throw new Error("useCrypto must be used within CryptoProvider.");
   }
 
   return context;

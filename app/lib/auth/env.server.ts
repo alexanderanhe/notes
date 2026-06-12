@@ -12,11 +12,11 @@ export function getEnv(name: RequiredVariable) {
   const value = process.env[name]?.trim();
 
   if (!value) {
-    throw new Error(`Falta la variable de entorno ${name}.`);
+    throw new Error(`Missing environment variable ${name}.`);
   }
 
   if (name === "SESSION_SECRET" && value.length < 32) {
-    throw new Error("SESSION_SECRET debe tener al menos 32 caracteres.");
+    throw new Error("SESSION_SECRET must be at least 32 characters.");
   }
 
   if (
@@ -25,7 +25,7 @@ export function getEnv(name: RequiredVariable) {
     Buffer.from(value, "base64").length !== 32
   ) {
     throw new Error(
-      "TOTP_ENCRYPTION_KEY debe ser una clave de 32 bytes en base64 o hex.",
+      "TOTP_ENCRYPTION_KEY must be a 32-byte base64 or hex key.",
     );
   }
 

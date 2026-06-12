@@ -24,7 +24,7 @@ export function LogoutButton() {
       className="flex w-full items-center justify-center gap-2 rounded-lg border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 disabled:opacity-60 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
     >
       <FiLogOut aria-hidden />
-      {working ? "Cerrando..." : "Cerrar sesión"}
+      {working ? "Signing out..." : "Sign out"}
     </button>
   );
 }

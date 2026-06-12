@@ -27,7 +27,7 @@ export function AuthLayout({
             to="/"
             className="mb-6 inline-block text-sm font-semibold text-blue-600 hover:text-blue-500"
           >
-            Notas privadas
+            Notes
           </Link>
           <h1 className="text-2xl font-semibold tracking-tight text-zinc-950 dark:text-white">
             {title}
@@ -76,7 +76,7 @@ export function AuthForm({
         disabled={submitting}
         className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
       >
-        {submitting ? "Procesando..." : submitLabel}
+        {submitting ? "Processing..." : submitLabel}
       </button>
     </Form>
   );

@@ -56,7 +56,7 @@ export default function SecuritySettings({ loaderData }: Route.ComponentProps) {
         return;
       }
       if (!response.ok || !result.success) {
-        setError(result.error ?? "No fue posible completar la operación.");
+        setError(result.error ?? "The operation could not be completed.");
         return;
       }
       if (result.backupCodes) {
@@ -67,7 +67,7 @@ export default function SecuritySettings({ loaderData }: Route.ComponentProps) {
         window.location.reload();
       }
     } catch {
-      setError("No fue posible completar la operación.");
+      setError("The operation could not be completed.");
     } finally {
       setWorking(false);
     }
@@ -102,52 +102,52 @@ export default function SecuritySettings({ loaderData }: Route.ComponentProps) {
         return;
       }
       if (!response.ok || !result.success) {
-        setError(result.error ?? "No fue posible guardar las preferencias.");
+        setError(result.error ?? "The preferences could not be saved.");
       }
     } catch {
-      setError("No fue posible guardar las preferencias.");
+      setError("The preferences could not be saved.");
     } finally {
       setWorking(false);
     }
   }
 
   return (
-    <SecurityLayout title="Seguridad" description="Administra la autenticación de dos factores de tu cuenta.">
+    <SecurityLayout title="Security" description="Manage two-factor authentication for your account.">
       <div className="space-y-6">
         <SecurityError message={error} />
         {!loaderData.enabled ? (
           <div>
-            <h2 className="font-semibold">Autenticación de dos factores</h2>
-            <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">Protege el inicio de sesión con códigos TOTP de 6 dígitos.</p>
-            <Link className={`${primaryButton} mt-4 inline-block`} to="/settings/security/2fa/setup">Activar 2FA</Link>
+            <h2 className="font-semibold">Two-factor authentication</h2>
+            <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">Protect sign in with 6-digit TOTP codes.</p>
+            <Link className={`${primaryButton} mt-4 inline-block`} to="/settings/security/2fa/setup">Enable 2FA</Link>
           </div>
         ) : (
           <>
             <div>
-              <h2 className="font-semibold text-emerald-700 dark:text-emerald-400">2FA está activo</h2>
+              <h2 className="font-semibold text-emerald-700 dark:text-emerald-400">2FA is enabled</h2>
               <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
-                Códigos de respaldo disponibles: {loaderData.backupCodesRemaining}
+                Backup codes available: {loaderData.backupCodesRemaining}
               </p>
             </div>
             <div className="flex flex-wrap gap-3 border-t border-zinc-200 pt-5 dark:border-zinc-800">
               <button type="button" className={secondaryButton} disabled={working} onClick={() => void requestSensitiveAction("regenerate")}>
-                Regenerar códigos de respaldo
+                Regenerate backup codes
               </button>
               <button type="button" className="rounded-lg bg-red-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60" disabled={working} onClick={() => void requestSensitiveAction("disable")}>
-                Desactivar 2FA
+                Disable 2FA
               </button>
             </div>
           </>
         )}
         <form className="space-y-4 border-t border-zinc-200 pt-5 dark:border-zinc-800" onSubmit={savePreferences}>
           <div>
-            <h2 className="font-semibold">Verificación adicional</h2>
-            <p className="mt-1 text-sm text-zinc-500">Preferencias preparadas para acciones sensibles presentes y futuras.</p>
+            <h2 className="font-semibold">Additional verification</h2>
+            <p className="mt-1 text-sm text-zinc-500">Preferences for current and future sensitive actions.</p>
           </div>
-          <PreferenceCheckbox name="require2FAForExport" label="Requerir 2FA reciente para exportar notas" defaultChecked={loaderData.securityPreferences.require2FAForExport} />
-          <PreferenceCheckbox name="require2FAForPasswordChange" label="Requerir 2FA reciente para cambiar contraseña" defaultChecked={loaderData.securityPreferences.require2FAForPasswordChange} />
-          <PreferenceCheckbox name="require2FAForCriticalNotes" label="Requerir 2FA reciente para notas críticas" defaultChecked={loaderData.securityPreferences.require2FAForCriticalNotes} />
-          <button className={secondaryButton} disabled={working}>Guardar preferencias</button>
+          <PreferenceCheckbox name="require2FAForExport" label="Require recent 2FA to export notes" defaultChecked={loaderData.securityPreferences.require2FAForExport} />
+          <PreferenceCheckbox name="require2FAForPasswordChange" label="Require recent 2FA to change password" defaultChecked={loaderData.securityPreferences.require2FAForPasswordChange} />
+          <PreferenceCheckbox name="require2FAForCriticalNotes" label="Require recent 2FA for critical notes" defaultChecked={loaderData.securityPreferences.require2FAForCriticalNotes} />
+          <button className={secondaryButton} disabled={working}>Save preferences</button>
         </form>
       </div>
     </SecurityLayout>
