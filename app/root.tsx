@@ -8,10 +8,13 @@ import {
 } from "react-router";
 
 import type { Route } from "./+types/root";
+import { PwaRegistration } from "./components/pwa-registration";
 import "./app.css";
 
 export const links: Route.LinksFunction = () => [
   { rel: "icon", href: "/icon.svg", type: "image/svg+xml" },
+  { rel: "apple-touch-icon", href: "/icon-192.png" },
+  { rel: "manifest", href: "/manifest.webmanifest" },
   { rel: "preconnect", href: "https://fonts.googleapis.com" },
   {
     rel: "preconnect",
@@ -44,11 +47,17 @@ export function Layout({ children }: { children: React.ReactNode }) {
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="application-name" content="Notes" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <meta name="apple-mobile-web-app-title" content="Notes" />
+        <meta name="theme-color" content="#09090b" />
         <Meta />
         <Links />
       </head>
       <body>
         {children}
+        <PwaRegistration />
         <ScrollRestoration />
         <Scripts />
       </body>

@@ -7,6 +7,7 @@ import {
   updateEncryptedNote,
 } from "~/lib/notes.server";
 import { assertSameOrigin, enforceRateLimit } from "~/lib/security.server";
+import { removeNoteFromWorkspace } from "~/lib/workspace.server";
 
 import type { Route } from "./+types/api.notes.$noteId";
 
@@ -55,6 +56,7 @@ export async function action({ params, request }: Route.ActionArgs) {
     if (!(await deleteEncryptedNote(user._id, noteId))) {
       throw new Response("Note not found.", { status: 404 });
     }
+    await removeNoteFromWorkspace(user._id, noteId);
     return Response.json({ deleted: true });
   }
 

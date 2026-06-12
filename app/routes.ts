@@ -22,6 +22,7 @@ export default [
   route("api/notes/:noteId", "routes/api.notes.$noteId.ts"),
   route("api/notes/:noteId/critical", "routes/api.notes.$noteId.critical.ts"),
   route("api/vault", "routes/api.vault.ts"),
+  route("api/workspace", "routes/api.workspace.ts"),
   route("app", "routes/app.tsx"),
   route("settings/security", "routes/settings.security.tsx"),
   route("settings/security/2fa/setup", "routes/settings.security.2fa.setup.tsx"),

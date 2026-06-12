@@ -1,6 +1,7 @@
 import { NotesDesktop } from "~/components/notes-desktop";
 import { CryptoProvider } from "~/contexts/crypto-provider";
 import { VaultProvider } from "~/contexts/vault-provider";
+import { WorkspaceProvider } from "~/contexts/workspace-context";
 import { requireUser } from "~/lib/auth/session.server";
 import { getThemePreference } from "~/lib/auth/users.server";
 
@@ -23,7 +24,9 @@ export default function PrivateApp({ loaderData }: Route.ComponentProps) {
   return (
     <CryptoProvider>
       <VaultProvider userId={loaderData.userId}>
-        <AppScreen email={loaderData.email} theme={loaderData.theme} />
+        <WorkspaceProvider>
+          <AppScreen email={loaderData.email} theme={loaderData.theme} />
+        </WorkspaceProvider>
       </VaultProvider>
     </CryptoProvider>
   );

@@ -1,9 +1,13 @@
-# Notas privadas
+# Notes
 
 Aplicación SSR E2EE construida con React Router 7, React 19, TypeScript,
 Tailwind CSS 4 y MongoDB. El servidor autentica usuarios y almacena blobs
 cifrados; títulos, contenidos, contraseñas adicionales y claves descifradas
 nunca se envían al backend.
+
+También es instalable como PWA. El service worker almacena únicamente recursos
+estáticos y muestra una pantalla offline segura; no cachea HTML autenticado,
+respuestas API ni contenido de notas.
 
 ## Funcionalidad
 
