@@ -7,4 +7,7 @@ export default defineConfig({
   resolve: {
     tsconfigPaths: true,
   },
+  ssr: {
+    noExternal: ["@uiw/react-md-editor", "@uiw/react-markdown-preview"],
+  },
 });
