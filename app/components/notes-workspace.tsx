@@ -32,6 +32,7 @@ import {
   FiUnlock,
   FiX,
 } from "react-icons/fi";
+import { Link } from "react-router";
 
 import { LogoutButton } from "~/components/logout-button";
 import { useVault } from "~/contexts/vault-context";
@@ -859,6 +860,13 @@ export function NotesWorkspace({ email }: { email: string }) {
           </div>
 
           <div className="border-t border-zinc-200 p-2 dark:border-zinc-800">
+            <Link
+              to="/settings/security"
+              className="mb-2 flex w-full items-center justify-center gap-2 rounded-lg border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            >
+              <FiShield aria-hidden />
+              Seguridad
+            </Link>
             <div className="mb-2 grid grid-cols-3 gap-1 rounded-lg bg-zinc-200/70 p-1 dark:bg-zinc-800">
               {(["light", "dark", "system"] as const).map((option) => (
                 <button

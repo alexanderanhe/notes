@@ -91,15 +91,51 @@ export function auditError(request: Request, event: string, error: unknown) {
   });
 }
 
+function parseOrigin(value: string | null) {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return url.pathname === "/" && !url.search && !url.hash ? url.origin : null;
+  } catch {
+    return null;
+  }
+}
+
+function firstForwardedValue(value: string | null) {
+  return value?.split(",")[0]?.trim() || null;
+}
+
+export function getExpectedOrigins(request: Request) {
+  const requestUrl = new URL(request.url);
+  const origins = new Set([requestUrl.origin]);
+  const configuredOrigin = parseOrigin(process.env.APP_ORIGIN?.trim() ?? null);
+  if (configuredOrigin) origins.add(configuredOrigin);
+
+  const host =
+    firstForwardedValue(request.headers.get("X-Forwarded-Host")) ??
+    request.headers.get("Host")?.trim() ??
+    null;
+  const protocol =
+    firstForwardedValue(request.headers.get("X-Forwarded-Proto")) ??
+    requestUrl.protocol.replace(":", "");
+
+  if (host && /^(https?|http)$/.test(protocol)) {
+    const proxyOrigin = parseOrigin(`${protocol}://${host}`);
+    if (proxyOrigin) origins.add(proxyOrigin);
+  }
+
+  return origins;
+}
+
 export function assertSameOrigin(request: Request) {
   if (["GET", "HEAD", "OPTIONS"].includes(request.method)) return;
-  const expected = new URL(request.url).origin;
   const origin = request.headers.get("Origin");
   const fetchSite = request.headers.get("Sec-Fetch-Site");
   const hasSession = request.headers.has("Cookie");
+  const expectedOrigins = getExpectedOrigins(request);
 
   if (
-    (origin && origin !== expected) ||
+    (origin && !expectedOrigins.has(origin)) ||
     (!origin && !fetchSite && hasSession) ||
     (!origin && fetchSite && !["same-origin", "none"].includes(fetchSite))
   ) {

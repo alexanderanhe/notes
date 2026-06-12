@@ -8,6 +8,7 @@ import {
 } from "~/components/auth-form";
 import { verifySecret } from "~/lib/auth/password.server";
 import {
+  createPartialSessionHeaders,
   createUserSessionHeaders,
   redirectAuthenticatedUser,
 } from "~/lib/auth/session.server";
@@ -94,13 +95,19 @@ export async function action({ request }: Route.ActionArgs) {
     requestId: getRequestId(request),
     userId: user._id.toHexString(),
   });
+  const twoFactorPending = user.twoFactor?.enabled === true;
   return Response.json(
     {
       success: true as const,
       userId: user._id.toHexString(),
       vault,
+      twoFactorPending,
     },
-    { headers: await createUserSessionHeaders(user._id.toHexString()) },
+    {
+      headers: twoFactorPending
+        ? await createPartialSessionHeaders(user._id.toHexString())
+        : await createUserSessionHeaders(user._id.toHexString()),
+    },
   );
 }
 
@@ -132,6 +139,7 @@ export default function Login() {
             success: true;
             userId: string;
             vault: ReturnType<typeof getUserVaultEnvelope>;
+            twoFactorPending: boolean;
           }
         | { error: string; email?: string; needsVerification?: boolean };
 
@@ -160,6 +168,20 @@ export default function Login() {
         return;
       }
 
+      try {
+        await persistDeviceUnlock(result.userId, masterKey);
+      } catch {
+        setError(
+          "La bóveda abrió, pero el navegador no permitió guardar la recuperación local. Revisa que IndexedDB esté habilitado.",
+        );
+        return;
+      }
+
+      if (result.twoFactorPending) {
+        window.location.assign("/auth/2fa");
+        return;
+      }
+
       const sessionCheck = await fetch("/api/vault", { redirect: "manual" });
       if (!sessionCheck.ok) {
         setError(
@@ -173,15 +195,6 @@ export default function Login() {
       } catch {
         setError(
           "La sesión inició, pero no fue posible migrar las notas antiguas. La contraseña anterior de bóveda podría ser diferente.",
-        );
-        return;
-      }
-
-      try {
-        await persistDeviceUnlock(result.userId, masterKey);
-      } catch {
-        setError(
-          "La bóveda abrió, pero el navegador no permitió guardar la recuperación local. Revisa que IndexedDB esté habilitado.",
         );
         return;
       }

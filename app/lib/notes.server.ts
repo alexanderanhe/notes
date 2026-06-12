@@ -11,6 +11,8 @@ import {
 
 interface NoteDocument extends EncryptedNoteInput {
   userId: ObjectId;
+  isCritical?: boolean;
+  criticalEnabledAt?: Date;
   createdAt: Date;
   updatedAt: Date;
   encryptedNoteKey?: string;
@@ -99,6 +101,10 @@ function serializeSummary(note: WithId<NoteDocument>): EncryptedNoteSummary {
     pinned: note.pinned,
     archived: note.archived,
     hasExtraPassword: note.hasExtraPassword ?? false,
+    isCritical: note.isCritical ?? false,
+    ...(note.criticalEnabledAt
+      ? { criticalEnabledAt: note.criticalEnabledAt.toISOString() }
+      : {}),
     createdAt: note.createdAt.toISOString(),
     updatedAt: note.updatedAt.toISOString(),
     ...(note.encryptedNoteKey
@@ -143,6 +149,7 @@ export async function createEncryptedNote(
   const result = await collection.insertOne({
     ...input,
     userId,
+    isCritical: false,
     createdAt: now,
     updatedAt: now,
   });
@@ -165,6 +172,15 @@ export async function getEncryptedNote(userId: ObjectId, noteId: string) {
     userId,
   });
   return note ? serializeNote(note) : null;
+}
+
+export async function getEncryptedNoteSummary(userId: ObjectId, noteId: string) {
+  if (!ObjectId.isValid(noteId)) return null;
+  const note = await (await notesCollection()).findOne(
+    { _id: new ObjectId(noteId), userId },
+    { projection: { encryptedContent: 0, contentIv: 0 } },
+  );
+  return note ? serializeSummary(note) : null;
 }
 
 export async function updateEncryptedNote(
@@ -209,4 +225,37 @@ export async function deleteEncryptedNote(userId: ObjectId, noteId: string) {
     userId,
   });
   return result.deletedCount === 1;
+}
+
+export async function setNoteCritical(
+  userId: ObjectId,
+  noteId: string,
+  isCritical: boolean,
+) {
+  if (!ObjectId.isValid(noteId)) return null;
+  const collection = await notesCollection();
+  const note = await collection.findOneAndUpdate(
+    { _id: new ObjectId(noteId), userId },
+    isCritical
+      ? {
+          $set: {
+            isCritical: true,
+            criticalEnabledAt: new Date(),
+            updatedAt: new Date(),
+          },
+        }
+      : {
+          $set: { isCritical: false, updatedAt: new Date() },
+          $unset: { criticalEnabledAt: "" },
+        },
+    { returnDocument: "after" },
+  );
+  return note ? serializeSummary(note) : null;
+}
+
+export async function hasCriticalNotes(userId: ObjectId) {
+  return (await notesCollection()).countDocuments(
+    { userId, isCritical: true },
+    { limit: 1 },
+  ).then((count) => count > 0);
 }

@@ -9,6 +9,8 @@ export interface EncryptedNoteSummary {
   pinned: boolean;
   archived: boolean;
   hasExtraPassword: boolean;
+  isCritical: boolean;
+  criticalEnabledAt?: string;
   createdAt: string;
   updatedAt: string;
   encryptedNoteKey?: string;

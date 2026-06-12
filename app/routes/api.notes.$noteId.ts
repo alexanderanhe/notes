@@ -1,7 +1,8 @@
-import { requireUser } from "~/lib/auth/session.server";
+import { requireRecent2FA, requireUser } from "~/lib/auth/session.server";
 import {
   deleteEncryptedNote,
   getEncryptedNote,
+  getEncryptedNoteSummary,
   parseEncryptedNoteInput,
   updateEncryptedNote,
 } from "~/lib/notes.server";
@@ -19,11 +20,21 @@ function requireNoteId(noteId: string | undefined) {
 export async function loader({ params, request }: Route.LoaderArgs) {
   enforceRateLimit(request, { bucket: "notes_read", limit: 240, windowMs: 60_000 });
   const user = await requireUser(request);
-  const note = await getEncryptedNote(user._id, requireNoteId(params.noteId));
+  const noteId = requireNoteId(params.noteId);
+  const summary = await getEncryptedNoteSummary(user._id, noteId);
 
-  if (!note) {
+  if (!summary) {
     throw new Response("Nota no encontrada.", { status: 404 });
   }
+  if (summary.isCritical) {
+    await requireRecent2FA(
+      request,
+      undefined,
+      `/app?action=open-critical&noteId=${encodeURIComponent(noteId)}`,
+    );
+  }
+  const note = await getEncryptedNote(user._id, noteId);
+  if (!note) throw new Response("Nota no encontrada.", { status: 404 });
 
   return Response.json({ note });
 }
@@ -33,6 +44,12 @@ export async function action({ params, request }: Route.ActionArgs) {
   enforceRateLimit(request, { bucket: "notes_write", limit: 120, windowMs: 60_000 });
   const user = await requireUser(request);
   const noteId = requireNoteId(params.noteId);
+  const summary = await getEncryptedNoteSummary(user._id, noteId);
+
+  if (!summary) throw new Response("Nota no encontrada.", { status: 404 });
+  if (summary.isCritical) {
+    await requireRecent2FA(request, undefined, "/app");
+  }
 
   if (request.method === "DELETE") {
     if (!(await deleteEncryptedNote(user._id, noteId))) {

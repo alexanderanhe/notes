@@ -46,11 +46,13 @@ Consulta [docs/encryption-architecture.md](docs/encryption-architecture.md) y
 ```env
 MONGODB_URI=mongodb://localhost:27017/notes
 SESSION_SECRET=replace-with-at-least-32-random-characters
+TOTP_ENCRYPTION_KEY=replace-with-32-random-bytes-in-base64-or-64-hex-characters
+APP_ORIGIN=https://notes.example.com
 RESEND_API_KEY=re_replace_me
 RESEND_FROM_EMAIL=Notas privadas <notes@example.com>
 ```
 
-Genera `SESSION_SECRET` con un CSPRNG y gestiona secretos mediante el proveedor
+Genera `SESSION_SECRET` y `TOTP_ENCRYPTION_KEY` con un CSPRNG y gestiona secretos mediante el proveedor
 de despliegue. Nunca incluyas `.env` en imágenes, logs o control de versiones.
 
 ## Desarrollo
@@ -73,8 +75,9 @@ pnpm run build
 1. Configura `NODE_ENV=production` y todas las variables requeridas.
 2. Sirve exclusivamente detrás de HTTPS.
 3. Configura límite de body en proxy de aproximadamente 9 MB.
-4. Asegura que el proxy sobrescriba `X-Forwarded-For`; no aceptes ese header
-   directamente desde internet.
+4. Configura `APP_ORIGIN` con el origen HTTPS público. Asegura que el proxy
+   sobrescriba `X-Forwarded-For`, `X-Forwarded-Host` y `X-Forwarded-Proto`; no
+   aceptes esos headers directamente desde internet.
 5. Para múltiples instancias, reemplaza el rate limiter en memoria por Redis/KV.
 6. Restringe MongoDB por red, usuario mínimo necesario, TLS y backups cifrados.
 7. Ejecuta tests, typecheck, build y auditoría de dependencias en CI.
@@ -99,11 +102,15 @@ La cookie de producción usa prefijo `__Host-`, `Secure`, `HttpOnly`,
 - `/auth/register`
 - `/auth/login`
 - `/auth/verify-email`
+- `/auth/2fa`
+- `/auth/2fa/confirm`
 - `/auth/logout`
 - `/app`
+- `/settings/security`
 - `/api/notes`
 - `/api/notes/:noteId`
 - `/api/vault`
+- `/api/2fa/confirm-action`
 
 ## Limitaciones conocidas
 

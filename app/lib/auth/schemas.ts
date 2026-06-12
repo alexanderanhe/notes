@@ -19,6 +19,33 @@ export const verificationCodeSchema = z
   .trim()
   .regex(/^\d{6}$/, "Ingresa un código válido.");
 
+export const totpCodeSchema = z
+  .string()
+  .trim()
+  .regex(/^\d{6}$/, "Ingresa un código de 6 dígitos.");
+
+export const backupCodeSchema = z
+  .string()
+  .trim()
+  .toUpperCase()
+  .regex(/^[A-Z2-9]{4}-[A-Z2-9]{4}$/, "Ingresa un código de respaldo válido.");
+
+export const twoFactorVerifySchema = z.object({
+  code: z.union([totpCodeSchema, backupCodeSchema]),
+});
+
+export const totpOnlySchema = z.object({ code: totpCodeSchema });
+
+export const securityPreferencesSchema = z.object({
+  require2FAForExport: z.boolean(),
+  require2FAForPasswordChange: z.boolean(),
+  require2FAForCriticalNotes: z.boolean(),
+});
+
+export const themePreferenceSchema = z.object({
+  theme: z.enum(["light", "dark", "system"]),
+});
+
 export const vaultEnvelopeSchema = z.custom<ReturnType<typeof parseVaultFields>>(
   isVaultEnvelope,
   "Envelope de bóveda inválido.",
@@ -48,4 +75,3 @@ export const verifyEmailSchema = z.object({
   email: emailSchema,
   code: verificationCodeSchema,
 });
-

@@ -16,6 +16,10 @@
 - [x] Preview Markdown sanitizado antes de renderizar HTML.
 - [x] Headers anti-XSS, anti-framing, HSTS, nosniff y permissions policy.
 - [x] Logger estructurado redacta campos sensibles.
+- [x] TOTP cifrado con AES-256-GCM y backup codes almacenados como hashes.
+- [x] Sesiones parciales bloquean las APIs privadas hasta completar 2FA.
+- [x] Acciones sensibles pueden exigir 2FA verificado en los últimos 10 minutos.
+- [x] Notas críticas no entregan ciphertext de contenido sin 2FA reciente.
 - [x] Errores inesperados no muestran stack en producción.
 - [x] Búsqueda y resaltado ocurren exclusivamente en memoria.
 - [x] Tests unitarios cubren primitivas crypto, auth, CSRF y rate limiting.
@@ -58,4 +62,3 @@ plana.
 8. Añadir tests de integración con MongoDB efímero y pruebas E2E de navegador.
 9. Añadir WebAuthn/passkeys para recuperación protegida de la bóveda.
 10. Definir CSP sin Google Fonts o servir fuentes desde el mismo origen.
-
