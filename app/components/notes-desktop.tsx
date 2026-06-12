@@ -529,7 +529,7 @@ export function NotesDesktop({
     <>
       <main className="flex h-dvh overflow-hidden bg-zinc-100 text-zinc-950 dark:bg-[#08090b] dark:text-zinc-100">
         {sidebarOpen ? <button aria-label="Cerrar navegación" className="fixed inset-0 z-30 bg-black/40 lg:hidden" onClick={() => setSidebarOpen(false)} /> : null}
-        <aside className={`${sidebarOpen ? "translate-x-0" : "-translate-x-full"} fixed inset-y-0 left-0 z-40 flex w-72 flex-col border-r border-zinc-200 bg-zinc-50 transition-transform lg:static lg:translate-x-0 dark:border-zinc-800 dark:bg-zinc-900`}>
+        <aside className={`${sidebarOpen ? "translate-x-0" : "-translate-x-full"} fixed inset-y-0 left-0 z-40 flex h-dvh max-h-dvh w-72 flex-col overflow-hidden border-r border-zinc-200 bg-zinc-50 transition-transform lg:static lg:translate-x-0 dark:border-zinc-800 dark:bg-zinc-900`}>
           <div className="flex items-center gap-3 px-4 py-4">
             <div className="grid h-8 w-8 place-items-center rounded-lg bg-zinc-950 text-white dark:bg-white dark:text-zinc-950"><FiBookOpen /></div>
             <div className="min-w-0"><p className="text-sm font-semibold">Notas privadas</p><p className="truncate text-xs text-zinc-500">{email}</p></div>
@@ -554,7 +554,7 @@ export function NotesDesktop({
               </button>
             ))}
           </div>
-          <div className="border-t border-zinc-200 p-2 dark:border-zinc-800">
+          <div className="shrink-0 border-t border-zinc-200 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] dark:border-zinc-800">
             <AccountMenu
               email={email}
               theme={theme}
@@ -588,13 +588,15 @@ export function NotesDesktop({
               onCritical={(isCritical) => noteWindow.encrypted && void setCritical(noteWindow.encrypted.id, isCritical)}
             />
           ))}
-          <div className="absolute inset-x-0 bottom-0 z-[900] flex min-h-11 gap-1 overflow-x-auto border-t border-zinc-200 bg-white/90 p-1.5 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/90">
-            {windows.map((noteWindow) => (
-              <button key={noteWindow.key} onClick={() => focusWindow(noteWindow.key)} className={`flex max-w-52 shrink-0 items-center gap-2 rounded-md px-3 py-1.5 text-xs ${noteWindow.minimized ? "bg-zinc-200 dark:bg-zinc-800" : "hover:bg-zinc-200 dark:hover:bg-zinc-800"}`}>
-                <FiFileText /><span className="truncate">{noteWindow.title || "Sin título"}</span>
-              </button>
-            ))}
-          </div>
+          {windows.length ? (
+            <div className="absolute inset-x-0 bottom-0 z-20 flex min-h-11 gap-1 overflow-x-auto border-t border-zinc-200 bg-white/90 p-1.5 pb-[max(0.375rem,env(safe-area-inset-bottom))] backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/90">
+              {windows.map((noteWindow) => (
+                <button key={noteWindow.key} onClick={() => focusWindow(noteWindow.key)} className={`flex max-w-52 shrink-0 items-center gap-2 rounded-md px-3 py-1.5 text-xs ${noteWindow.minimized ? "bg-zinc-200 dark:bg-zinc-800" : "hover:bg-zinc-200 dark:hover:bg-zinc-800"}`}>
+                  <FiFileText /><span className="truncate">{noteWindow.title || "Sin título"}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
         </section>
       </main>
       {passwordAction ? <PasswordDialog action={passwordAction} working={working} onCancel={() => setPasswordAction(null)} onSubmit={handlePasswordAction} /> : null}
