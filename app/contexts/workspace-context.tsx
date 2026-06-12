@@ -20,6 +20,9 @@ interface WorkspaceContextValue extends WorkspaceState {
   openNote: (noteId: string) => void;
   closeNote: (noteId: string) => void;
   setActiveNote: (noteId: string | null) => void;
+  openItem: (itemId: string) => void;
+  closeItem: (itemId: string) => void;
+  setActiveItem: (itemId: string | null) => void;
   setSidebarWidth: (width: number) => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
   updateNoteUiState: (
@@ -59,6 +62,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify({
           openNoteIds: snapshot.openNoteIds,
           activeNoteId: snapshot.activeNoteId,
+          openItemIds: snapshot.openItemIds,
+          activeItemId: snapshot.activeItemId,
           sidebarWidth: snapshot.sidebarWidth,
           sidebarCollapsed: snapshot.sidebarCollapsed,
           noteUiState: snapshot.noteUiState,
@@ -147,6 +152,43 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [persistWorkspaceDebounced, updateWorkspace],
   );
 
+  const openItem = useCallback(
+    (itemId: string) => {
+      updateWorkspace((current) => ({
+        ...current,
+        openItemIds: current.openItemIds.includes(itemId)
+          ? current.openItemIds
+          : [...current.openItemIds, itemId].slice(-MAX_OPEN_NOTES),
+        activeItemId: itemId,
+      }));
+      persistWorkspaceDebounced();
+    },
+    [persistWorkspaceDebounced, updateWorkspace],
+  );
+
+  const closeItem = useCallback(
+    (itemId: string) => {
+      updateWorkspace((current) => {
+        const openItemIds = current.openItemIds.filter((id) => id !== itemId);
+        return {
+          ...current,
+          openItemIds,
+          activeItemId: current.activeItemId === itemId ? openItemIds[0] ?? null : current.activeItemId,
+        };
+      });
+      persistWorkspaceDebounced();
+    },
+    [persistWorkspaceDebounced, updateWorkspace],
+  );
+
+  const setActiveItem = useCallback(
+    (activeItemId: string | null) => {
+      updateWorkspace((current) => ({ ...current, activeItemId }));
+      persistWorkspaceDebounced();
+    },
+    [persistWorkspaceDebounced, updateWorkspace],
+  );
+
   const setSidebarWidth = useCallback(
     (sidebarWidth: number) => {
       updateWorkspace((current) => ({ ...current, sidebarWidth }));
@@ -192,6 +234,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         openNote,
         closeNote,
         setActiveNote,
+        openItem,
+        closeItem,
+        setActiveItem,
         setSidebarWidth,
         setSidebarCollapsed,
         updateNoteUiState,

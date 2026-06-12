@@ -7,6 +7,8 @@ interface WorkspaceDocument {
   userId: ObjectId;
   openNoteIds: ObjectId[];
   activeNoteId: ObjectId | null;
+  openItemIds?: ObjectId[];
+  activeItemId?: ObjectId | null;
   sidebarWidth: number;
   sidebarCollapsed: boolean;
   noteUiState: Record<
@@ -26,22 +28,31 @@ async function workspacesCollection(): Promise<Collection<WorkspaceDocument>> {
   return collection;
 }
 
-async function ownedNoteIds(userId: ObjectId, noteIds: string[]) {
-  const validIds = noteIds
+async function ownedItemIds(userId: ObjectId, itemIds: string[]) {
+  const validIds = itemIds
     .filter((id) => ObjectId.isValid(id))
     .map((id) => new ObjectId(id));
   if (!validIds.length) return new Set<string>();
-  const notes = await (await getDb())
+  const db = await getDb();
+  const [notes, vaultItems] = await Promise.all([
+    db
     .collection<{ userId: ObjectId }>("notes")
     .find({ userId, _id: { $in: validIds } }, { projection: { _id: 1 } })
-    .toArray();
-  return new Set(notes.map((note) => note._id.toHexString()));
+    .toArray(),
+    db
+      .collection<{ userId: ObjectId }>("vaultItems")
+      .find({ userId, _id: { $in: validIds } }, { projection: { _id: 1 } })
+      .toArray(),
+  ]);
+  return new Set([...notes, ...vaultItems].map((item) => item._id.toHexString()));
 }
 
 function serializeWorkspace(document: WithId<WorkspaceDocument>): WorkspaceState {
   return {
     openNoteIds: document.openNoteIds.map((id) => id.toHexString()),
     activeNoteId: document.activeNoteId?.toHexString() ?? null,
+    openItemIds: (document.openItemIds ?? document.openNoteIds).map((id) => id.toHexString()),
+    activeItemId: (document.activeItemId ?? document.activeNoteId)?.toHexString() ?? null,
     sidebarWidth: document.sidebarWidth,
     sidebarCollapsed: document.sidebarCollapsed,
     noteUiState: document.noteUiState,
@@ -57,11 +68,13 @@ export async function getWorkspace(userId: ObjectId) {
   const serialized = serializeWorkspace(document);
   const normalized = normalizeWorkspace(
     serialized,
-    await ownedNoteIds(userId, serialized.openNoteIds),
+    await ownedItemIds(userId, [...serialized.openNoteIds, ...serialized.openItemIds]),
   );
   if (
     normalized.openNoteIds.length !== serialized.openNoteIds.length ||
     normalized.activeNoteId !== serialized.activeNoteId
+    || normalized.openItemIds.length !== serialized.openItemIds.length
+    || normalized.activeItemId !== serialized.activeItemId
   ) {
     return saveWorkspace(userId, normalized);
   }
@@ -74,7 +87,7 @@ export async function saveWorkspace(
 ) {
   const normalized = normalizeWorkspace(
     input,
-    await ownedNoteIds(userId, input.openNoteIds ?? []),
+    await ownedItemIds(userId, [...(input.openNoteIds ?? []), ...(input.openItemIds ?? [])]),
   );
   const now = new Date();
   const document = await (await workspacesCollection()).findOneAndUpdate(
@@ -85,6 +98,8 @@ export async function saveWorkspace(
         activeNoteId: normalized.activeNoteId
           ? new ObjectId(normalized.activeNoteId)
           : null,
+        openItemIds: normalized.openItemIds.map((id) => new ObjectId(id)),
+        activeItemId: normalized.activeItemId ? new ObjectId(normalized.activeItemId) : null,
         sidebarWidth: normalized.sidebarWidth,
         sidebarCollapsed: normalized.sidebarCollapsed,
         noteUiState: normalized.noteUiState,
@@ -103,13 +118,33 @@ export async function removeNoteFromWorkspace(userId: ObjectId, noteId: string) 
   await collection.updateOne(
     { userId },
     {
-      $pull: { openNoteIds: new ObjectId(noteId) },
+      $pull: { openNoteIds: new ObjectId(noteId), openItemIds: new ObjectId(noteId) },
       $unset: { [`noteUiState.${noteId}`]: "" },
       $set: { updatedAt: new Date() },
     },
   );
   await collection.updateOne(
-    { userId, activeNoteId: new ObjectId(noteId) },
-    { $set: { activeNoteId: null, updatedAt: new Date() } },
+    {
+      userId,
+      $or: [
+        { activeNoteId: new ObjectId(noteId) },
+        { activeItemId: new ObjectId(noteId) },
+      ],
+    },
+    { $set: { activeNoteId: null, activeItemId: null, updatedAt: new Date() } },
+  );
+}
+
+export async function removeItemFromWorkspace(userId: ObjectId, itemId: string) {
+  if (!ObjectId.isValid(itemId)) return;
+  const id = new ObjectId(itemId);
+  const collection = await workspacesCollection();
+  await collection.updateOne(
+    { userId },
+    { $pull: { openItemIds: id }, $set: { updatedAt: new Date() } },
+  );
+  await collection.updateOne(
+    { userId, activeItemId: id },
+    { $set: { activeItemId: null, updatedAt: new Date() } },
   );
 }

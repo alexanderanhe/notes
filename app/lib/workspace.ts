@@ -13,6 +13,8 @@ export interface WorkspaceNoteUiState {
 export interface WorkspaceState {
   openNoteIds: string[];
   activeNoteId: string | null;
+  openItemIds: string[];
+  activeItemId: string | null;
   sidebarWidth: number;
   sidebarCollapsed: boolean;
   noteUiState: Record<string, WorkspaceNoteUiState>;
@@ -22,6 +24,8 @@ export interface WorkspaceState {
 export const emptyWorkspace: WorkspaceState = {
   openNoteIds: [],
   activeNoteId: null,
+  openItemIds: [],
+  activeItemId: null,
   sidebarWidth: DEFAULT_SIDEBAR_WIDTH,
   sidebarCollapsed: false,
   noteUiState: {},
@@ -30,15 +34,24 @@ export const emptyWorkspace: WorkspaceState = {
 
 export function normalizeWorkspace(
   input: Partial<WorkspaceState> | null | undefined,
-  ownedNoteIds: ReadonlySet<string>,
+  ownedItemIds: ReadonlySet<string>,
 ): WorkspaceState {
   const openNoteIds = Array.from(
-    new Set((input?.openNoteIds ?? []).filter((id) => ownedNoteIds.has(id))),
+    new Set((input?.openNoteIds ?? []).filter((id) => ownedItemIds.has(id))),
   ).slice(0, MAX_OPEN_NOTES);
   const activeNoteId =
     input?.activeNoteId && openNoteIds.includes(input.activeNoteId)
       ? input.activeNoteId
       : openNoteIds[0] ?? null;
+  const openItemIds = Array.from(
+    new Set((input?.openItemIds ?? openNoteIds).filter((id) => ownedItemIds.has(id))),
+  ).slice(0, MAX_OPEN_NOTES);
+  const activeItemId =
+    input?.activeItemId && openItemIds.includes(input.activeItemId)
+      ? input.activeItemId
+      : openItemIds.includes(activeNoteId ?? "")
+        ? activeNoteId
+        : openItemIds[0] ?? null;
   const noteUiState = Object.fromEntries(
     openNoteIds.map((id) => {
       const state = input?.noteUiState?.[id];
@@ -57,6 +70,8 @@ export function normalizeWorkspace(
   return {
     openNoteIds,
     activeNoteId,
+    openItemIds,
+    activeItemId,
     sidebarWidth: clampNumber(
       input?.sidebarWidth,
       MIN_SIDEBAR_WIDTH,

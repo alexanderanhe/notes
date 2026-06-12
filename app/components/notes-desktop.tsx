@@ -3,6 +3,8 @@ import "@uiw/react-md-editor/markdown-editor.css";
 import MDEditor from "@uiw/react-md-editor/nohighlight";
 import rehypeSanitize from "rehype-sanitize";
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useRef,
@@ -42,6 +44,7 @@ import {
   FiX,
 } from "react-icons/fi";
 import { Link, useSearchParams } from "react-router";
+import { toast } from "sonner";
 
 import { LogoutButton } from "~/components/logout-button";
 import { useVault } from "~/contexts/vault-context";
@@ -81,6 +84,12 @@ type NoteFilter = "all" | "favorites" | "archived";
 type WindowMode = "preview" | "edit";
 type SyncStatus = "idle" | "saving" | "saved" | "error";
 type ThemePreference = "light" | "dark" | "system";
+
+const VaultItemsPanel = lazy(() =>
+  import("~/components/vault-items-panel").then((module) => ({
+    default: module.VaultItemsPanel,
+  })),
+);
 
 interface NoteWindow {
   key: number;
@@ -140,6 +149,7 @@ export function NotesDesktop({
   const [error, setError] = useState("");
   const [passwordAction, setPasswordAction] = useState<PasswordAction | null>(null);
   const [working, setWorking] = useState(false);
+  const [vaultItemsOpen, setVaultItemsOpen] = useState(false);
   const [theme, setTheme] = useState<ThemePreference>(initialTheme);
   const [searchParams, setSearchParams] = useSearchParams();
   const resumedAction = useRef(false);
@@ -237,6 +247,7 @@ export function NotesDesktop({
     async (key: number) => {
       const snapshot = windowsRef.current.find((window) => window.key === key);
       if (!snapshot?.dirty || !masterKey || savingRef.current.has(key)) return;
+      const creating = !snapshot.encrypted;
       savingRef.current.add(key);
       updateWindow(key, (window) => ({ ...window, sync: "saving" }));
       try {
@@ -276,6 +287,10 @@ export function NotesDesktop({
           sync: current.version === snapshot.version ? "saved" : "idle",
         }));
         workspace.openNote(note.id);
+        toast.success(creating ? "Note created" : "Note saved", {
+          id: `note-save-${note.id}`,
+          duration: 1_800,
+        });
       } catch {
         updateWindow(key, (window) => ({ ...window, sync: "error" }));
         setError("A note could not be synced.");
@@ -468,7 +483,7 @@ export function NotesDesktop({
 
   async function deleteWindowNote(key: number) {
     const target = windowsRef.current.find((window) => window.key === key);
-    if (!target?.encrypted || !window.confirm("Permanently delete this note?")) return;
+    if (!target?.encrypted) return;
     setWorking(true);
     try {
       await requestJson(`/api/notes/${target.encrypted.id}`, { method: "DELETE" });
@@ -480,11 +495,30 @@ export function NotesDesktop({
       });
       updateWindows((current) => current.filter((window) => window.key !== key));
       workspace.closeNote(target.encrypted.id);
+      toast.success("Note deleted");
     } catch {
       setError("The note could not be deleted.");
     } finally {
       setWorking(false);
     }
+  }
+
+  function confirmDeleteWindowNote(key: number) {
+    const target = windowsRef.current.find((window) => window.key === key);
+    if (!target?.encrypted) return;
+    toast.warning("Permanently delete this note?", {
+      id: `delete-note-${target.encrypted.id}`,
+      description: "This action cannot be undone.",
+      duration: Infinity,
+      action: {
+        label: "Delete",
+        onClick: () => void deleteWindowNote(key),
+      },
+      cancel: {
+        label: "Cancel",
+        onClick: () => undefined,
+      },
+    });
   }
 
   function beginDrag(event: ReactPointerEvent<HTMLDivElement>, key: number) {
@@ -619,6 +653,7 @@ export function NotesDesktop({
           </div>
           <div className="space-y-2 px-2">
             <SidebarButton icon={<FiPlus />} label="New note" onClick={createNote} />
+            <SidebarButton icon={<FiKey />} label="Personal Vault" onClick={() => setVaultItemsOpen(true)} />
             <label className="relative block">
               <FiSearch className="absolute top-2.5 left-2.5 text-zinc-400" />
               <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search notes" className="w-full rounded-md bg-zinc-200/60 py-2 pr-3 pl-8 text-sm outline-none dark:bg-zinc-800" />
@@ -647,7 +682,7 @@ export function NotesDesktop({
           <SidebarResizeHandle onPointerDown={beginSidebarResize} />
         </aside>
 
-        <section className="relative min-w-0 flex-1 overflow-hidden">
+        <section className="workspace-background relative min-w-0 flex-1 overflow-hidden">
           <button
             type="button"
             title={workspace.sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
@@ -677,7 +712,7 @@ export function NotesDesktop({
               onDrag={(event) => beginDrag(event, noteWindow.key)}
               onChange={(values) => changeWindow(noteWindow.key, values)}
               onClose={() => void closeWindow(noteWindow.key)}
-              onDelete={() => void deleteWindowNote(noteWindow.key)}
+              onDelete={() => confirmDeleteWindowNote(noteWindow.key)}
               onMode={(mode) => {
                 updateWindow(noteWindow.key, (window) => ({ ...window, mode }));
                 if (noteWindow.encrypted) {
@@ -714,6 +749,11 @@ export function NotesDesktop({
         </section>
       </main>
       {passwordAction ? <PasswordDialog action={passwordAction} working={working} onCancel={() => setPasswordAction(null)} onSubmit={handlePasswordAction} /> : null}
+      {vaultItemsOpen ? (
+        <Suspense fallback={null}>
+          <VaultItemsPanel onClose={() => setVaultItemsOpen(false)} />
+        </Suspense>
+      ) : null}
     </>
   );
 }
@@ -856,12 +896,22 @@ function NoteWindowView({
   const articleRef = useRef<HTMLElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestScrollTop = useRef(0);
+  const restoredScrollKey = useRef("");
 
   useEffect(() => {
     const noteId = noteWindow.encrypted?.id;
     if (!noteId || !scrollRef.current) return;
-    scrollRef.current.scrollTop = workspace.noteUiState[noteId]?.scrollTop ?? 0;
-  }, [noteWindow.encrypted?.id, workspace.noteUiState]);
+    const restoreKey = `${noteId}:${noteWindow.mode}`;
+    if (restoredScrollKey.current === restoreKey) return;
+    restoredScrollKey.current = restoreKey;
+    const scrollTop = workspace.noteUiState[noteId]?.scrollTop ?? 0;
+    latestScrollTop.current = scrollTop;
+    const frame = requestAnimationFrame(() => {
+      if (scrollRef.current) scrollRef.current.scrollTop = scrollTop;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [noteWindow.encrypted?.id, noteWindow.mode]);
 
   useEffect(
     () => () => {
@@ -875,10 +925,11 @@ function NoteWindowView({
   }, []);
 
   function handleScroll(scrollTop: number) {
+    latestScrollTop.current = scrollTop;
     if (scrollTimer.current) return;
     scrollTimer.current = setTimeout(() => {
       scrollTimer.current = null;
-      onScroll(scrollTop);
+      onScroll(latestScrollTop.current);
     }, 300);
   }
 
@@ -890,6 +941,18 @@ function NoteWindowView({
     } catch {
       setCopied(false);
     }
+  }
+
+  function openLocalAI() {
+    if (!aiCapabilities) {
+      toast.info("Checking Local AI availability...");
+      return;
+    }
+    if (!hasAnyLocalAI(aiCapabilities)) {
+      toast.info("Local AI is unavailable in this browser or device.");
+      return;
+    }
+    setAiOpen(true);
   }
 
   const style = noteWindow.maximized
@@ -918,7 +981,9 @@ function NoteWindowView({
     >
       <div onPointerDown={onDrag} onDoubleClick={onMaximize} className="flex h-10 shrink-0 cursor-move items-center gap-2 border-b border-zinc-200 bg-zinc-100 px-2 dark:border-zinc-700 dark:bg-zinc-800">
         <FiFileText className="shrink-0 text-zinc-500" />
-        <span className="min-w-0 flex-1 truncate text-xs font-medium">{noteWindow.title || "Untitled"}</span>
+        <span className="min-w-0 flex-1 truncate text-xs font-medium">
+          {noteWindow.mode === "edit" ? "Editing note" : noteWindow.title || "Untitled"}
+        </span>
         <SyncDot status={noteWindow.sync} />
         <WindowButton label="Minimize" onClick={onMinimize}><FiMinus /></WindowButton>
         <WindowButton label={noteWindow.maximized ? "Restore" : "Maximize"} onClick={onMaximize}>{noteWindow.maximized ? <FiMinimize2 /> : <FiMaximize2 />}</WindowButton>
@@ -926,10 +991,17 @@ function NoteWindowView({
       </div>
       {!noteWindow.minimized ? (
         <>
-          <div className="flex h-12 shrink-0 items-center gap-2 border-b border-zinc-200 px-3 dark:border-zinc-800">
-            {noteWindow.mode === "edit" ? (
+          {noteWindow.mode === "edit" ? (
+            <div className="flex h-12 shrink-0 items-center border-b border-zinc-200 px-3 sm:pr-64 dark:border-zinc-800">
               <input value={noteWindow.title} onChange={(event) => onChange({ title: event.target.value })} placeholder="Untitled" className="min-w-0 flex-1 bg-transparent text-base font-semibold outline-none" />
-            ) : <h2 className="flex min-w-0 flex-1 items-center gap-2 truncate font-semibold">{noteWindow.encrypted?.isCritical ? <CriticalBadge /> : null}<span className="truncate">{noteWindow.title || "Untitled"}</span></h2>}
+            </div>
+          ) : null}
+          {noteWindow.mode === "preview" && noteWindow.encrypted?.isCritical ? (
+            <div className="absolute top-14 left-3 z-[1040]">
+              <CriticalBadge />
+            </div>
+          ) : null}
+          <div className="absolute top-12 right-3 z-[1050] flex items-center gap-2 rounded-lg border border-zinc-200 bg-white/90 p-1.5 shadow-lg backdrop-blur dark:border-zinc-700 dark:bg-zinc-900/90">
             <button type="button" onClick={() => onMode(noteWindow.mode === "preview" ? "edit" : "preview")} className="flex items-center gap-2 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white"><FiEdit3 />{noteWindow.mode === "preview" ? "Edit" : "Preview"}</button>
             <button
               type="button"
@@ -943,7 +1015,7 @@ function NoteWindowView({
             </button>
             <div className="relative">
               <button aria-label="More options" onClick={() => setMenu((current) => !current)} className="rounded-md border border-zinc-300 p-2 dark:border-zinc-700"><FiMoreHorizontal /></button>
-              {menu ? <NoteMenu noteWindow={noteWindow} working={working} aiAvailable={hasAnyLocalAI(aiCapabilities)} onAI={() => setAiOpen(true)} onChange={onChange} onDelete={onDelete} onProtection={onProtection} onCritical={onCritical} onClose={() => setMenu(false)} /> : null}
+              {menu ? <NoteMenu noteWindow={noteWindow} working={working} onAI={openLocalAI} onChange={onChange} onDelete={onDelete} onProtection={onProtection} onCritical={onCritical} onClose={() => setMenu(false)} /> : null}
             </div>
           </div>
           <div
@@ -956,16 +1028,16 @@ function NoteWindowView({
                 <MDEditor value={noteWindow.content} onChange={(value) => onChange({ content: value ?? "" })} preview="edit" height="100%" visibleDragbar={false} textareaProps={{ placeholder: "Write in Markdown..." }} className="!rounded-none !border-0 !shadow-none" />
               </div>
             ) : (
-              <div className="min-h-full bg-white p-6 dark:bg-[#0d1117]">
+              <div className="min-h-full bg-white px-6 pt-16 pb-6 dark:bg-[#0d1117]">
                 <MDEditor.Markdown source={noteWindow.content || "*This note has no content.*"} rehypePlugins={[[rehypeSanitize]]} />
               </div>
             )}
           </div>
         </>
       ) : null}
-      {aiOpen ? (
+      {aiOpen && aiCapabilities ? (
         <LocalAIPanel
-          capabilities={aiCapabilities!}
+          capabilities={aiCapabilities}
           content={noteWindow.content}
           getSelection={() => {
             const textarea = articleRef.current?.querySelector("textarea");
@@ -1004,10 +1076,9 @@ function NoteWindowView({
   );
 }
 
-function NoteMenu({ noteWindow, working, aiAvailable, onAI, onChange, onDelete, onProtection, onCritical, onClose }: {
+function NoteMenu({ noteWindow, working, onAI, onChange, onDelete, onProtection, onCritical, onClose }: {
   noteWindow: NoteWindow;
   working: boolean;
-  aiAvailable: boolean;
   onAI: () => void;
   onChange: (values: Partial<Pick<NoteWindow, "pinned" | "archived">>) => void;
   onDelete: () => void;
@@ -1021,13 +1092,9 @@ function NoteMenu({ noteWindow, working, aiAvailable, onAI, onChange, onDelete, 
       <MenuLabel>Note</MenuLabel>
       <MenuButton icon={<FiStar />} label={noteWindow.pinned ? "Unpin" : "Pin"} onClick={() => action(() => onChange({ pinned: !noteWindow.pinned }))} />
       <MenuButton icon={<FiArchive />} label={noteWindow.archived ? "Unarchive" : "Archive"} onClick={() => action(() => onChange({ archived: !noteWindow.archived }))} />
-      {aiAvailable ? (
-        <>
-          <MenuDivider />
-          <MenuLabel>Intelligence</MenuLabel>
-          <MenuButton icon={<FiCpu />} label="Local AI" onClick={() => action(onAI)} />
-        </>
-      ) : null}
+      <MenuDivider />
+      <MenuLabel>Intelligence</MenuLabel>
+      <MenuButton icon={<FiCpu />} label="Local AI" onClick={() => action(onAI)} />
       {noteWindow.encrypted ? (
         <>
           <MenuDivider />
@@ -1290,19 +1357,19 @@ function PasswordDialog({ action, working, onCancel, onSubmit }: {
   const needsCurrent = action.mode !== "protect";
   return (
     <div className="fixed inset-0 z-[2000] grid place-items-center bg-black/60 p-4">
-      <form onSubmit={(event) => { event.preventDefault(); if (!needsNew || next === confirmation) void onSubmit(current, next); }} className="w-full max-w-md space-y-4 rounded-xl bg-white p-6 shadow-2xl dark:bg-zinc-900">
+      <form autoComplete="off" data-form-type="other" onSubmit={(event) => { event.preventDefault(); if (!needsNew || next === confirmation) void onSubmit(current, next); }} className="w-full max-w-md space-y-4 rounded-xl bg-white p-6 shadow-2xl dark:bg-zinc-900">
         <h2 className="text-lg font-semibold">{action.mode === "open" ? "Open protected note" : action.mode === "protect" ? "Protect note" : action.mode === "change" ? "Change password" : "Remove protection"}</h2>
         <p className="text-sm text-zinc-500">This password is never sent to the server and cannot be recovered.</p>
-        {needsCurrent ? <PasswordInput label="Current password" value={current} onChange={setCurrent} /> : null}
-        {needsNew ? <><PasswordInput label="New password" value={next} onChange={setNext} /><PasswordInput label="Confirm password" value={confirmation} onChange={setConfirmation} /></> : null}
+        {needsCurrent ? <PasswordInput name="note-unlock-secret" label="Current password" value={current} onChange={setCurrent} /> : null}
+        {needsNew ? <><PasswordInput name="note-new-secret" label="New password" value={next} onChange={setNext} /><PasswordInput name="note-new-secret-confirmation" label="Confirm password" value={confirmation} onChange={setConfirmation} /></> : null}
         <div className="flex justify-end gap-2"><button type="button" onClick={onCancel} className="rounded-lg border border-zinc-300 px-4 py-2 text-sm dark:border-zinc-700">Cancel</button><button disabled={working || (needsCurrent && !current) || (needsNew && (!next || next !== confirmation))} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Continue</button></div>
       </form>
     </div>
   );
 }
 
-function PasswordInput({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
-  return <label className="block text-sm font-medium">{label}<input required type="password" value={value} onChange={(event) => onChange(event.target.value)} className="mt-2 w-full rounded-lg border border-zinc-300 bg-transparent px-3 py-2 dark:border-zinc-700" /></label>;
+function PasswordInput({ name, label, value, onChange }: { name: string; label: string; value: string; onChange: (value: string) => void }) {
+  return <label className="block text-sm font-medium">{label}<input required name={name} type="password" autoComplete="new-password" data-1p-ignore data-lpignore="true" data-form-type="other" value={value} onChange={(event) => onChange(event.target.value)} className="mt-2 w-full rounded-lg border border-zinc-300 bg-transparent px-3 py-2 dark:border-zinc-700" /></label>;
 }
 
 function SidebarButton({ active, icon, label, count, onClick }: { active?: boolean; icon: ReactNode; label: string; count?: number; onClick: () => void }) {

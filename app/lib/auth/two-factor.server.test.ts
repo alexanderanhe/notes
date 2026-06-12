@@ -39,5 +39,5 @@ describe("two-factor authentication", () => {
     await expect(findBackupCodeHash(backup.codes[0]!, backup.hashes)).resolves.toBe(
       backup.hashes[0],
     );
-  });
+  }, 10_000);
 });

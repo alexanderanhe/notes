@@ -1332,6 +1332,8 @@ function ExtraPasswordDialog({
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4">
       <form
+        autoComplete="off"
+        data-form-type="other"
         onSubmit={(event) => {
           event.preventDefault();
           if (needsNewPassword && newPassword !== confirmation) return;
@@ -1348,6 +1350,7 @@ function ExtraPasswordDialog({
         <ErrorMessage message={error} />
         {needsCurrentPassword ? (
           <PasswordField
+            name="note-unlock-secret"
             label={
               action.mode === "open"
                 ? "Additional password"
@@ -1360,11 +1363,13 @@ function ExtraPasswordDialog({
         {needsNewPassword ? (
           <>
             <PasswordField
+              name="note-new-secret"
               label="New additional password"
               value={newPassword}
               onChange={setNewPassword}
             />
             <PasswordField
+              name="note-new-secret-confirmation"
               label="Confirm password"
               value={confirmation}
               onChange={setConfirmation}
@@ -1400,10 +1405,12 @@ function ExtraPasswordDialog({
 }
 
 function PasswordField({
+  name,
   label,
   value,
   onChange,
 }: {
+  name: string;
   label: string;
   value: string;
   onChange: (value: string) => void;
@@ -1413,8 +1420,12 @@ function PasswordField({
       {label}
       <input
         type="password"
+        name={name}
         required
-        autoComplete="off"
+        autoComplete="new-password"
+        data-1p-ignore
+        data-lpignore="true"
+        data-form-type="other"
         value={value}
         onChange={(event) => onChange(event.target.value)}
         className="mt-1 block w-full rounded-lg border border-zinc-300 bg-transparent px-3 py-2 outline-none focus:border-blue-500 dark:border-zinc-700"

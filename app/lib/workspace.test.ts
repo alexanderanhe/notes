@@ -73,4 +73,19 @@ describe("workspace normalization", () => {
     );
     expect(workspace.activeNoteId).toBe("b");
   });
+
+  it("restores vault items while keeping legacy note workspace fields", () => {
+    const workspace = normalizeWorkspace(
+      {
+        openNoteIds: ["legacy-note"],
+        activeNoteId: "legacy-note",
+        openItemIds: ["vault-item"],
+        activeItemId: "vault-item",
+      },
+      new Set(["legacy-note", "vault-item"]),
+    );
+    expect(workspace.openNoteIds).toEqual(["legacy-note"]);
+    expect(workspace.openItemIds).toEqual(["vault-item"]);
+    expect(workspace.activeItemId).toBe("vault-item");
+  });
 });

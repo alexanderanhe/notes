@@ -10,6 +10,8 @@ const workspaceSchema = z
   .object({
     openNoteIds: z.array(z.string()).max(10),
     activeNoteId: z.string().nullable(),
+    openItemIds: z.array(z.string()).max(10).optional(),
+    activeItemId: z.string().nullable().optional(),
     sidebarWidth: z.number(),
     sidebarCollapsed: z.boolean(),
     noteUiState: z.record(
