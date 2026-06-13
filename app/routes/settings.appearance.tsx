@@ -6,6 +6,7 @@ import { SecurityLayout } from "~/components/security-layout";
 import { requireUser } from "~/lib/auth/session.server";
 import { getBackgroundPreference, getThemePreference } from "~/lib/auth/users.server";
 import { isUnsplashConfigured, type UnsplashPhoto } from "~/lib/unsplash.server";
+import { applyTheme, useThemePreference } from "~/lib/theme";
 
 import type { Route } from "./+types/settings.appearance";
 
@@ -25,6 +26,7 @@ export default function AppearanceSettings({ loaderData }: Route.ComponentProps)
   const [query, setQuery] = useState("");
   const [photos, setPhotos] = useState<UnsplashPhoto[]>([]);
   const [working, setWorking] = useState(false);
+  useThemePreference(theme);
 
   async function saveTheme(nextTheme: typeof theme) {
     const response = await fetch("/api/preferences/theme", {
@@ -33,10 +35,7 @@ export default function AppearanceSettings({ loaderData }: Route.ComponentProps)
     });
     if (!response.ok) return toast.error("The theme could not be saved.");
     setTheme(nextTheme);
-    const media = window.matchMedia("(prefers-color-scheme: dark)");
-    const dark = nextTheme === "dark" || (nextTheme === "system" && media.matches);
-    document.documentElement.classList.toggle("dark", dark);
-    document.documentElement.classList.toggle("light", !dark);
+    applyTheme(nextTheme);
     toast.success("Theme saved");
   }
 

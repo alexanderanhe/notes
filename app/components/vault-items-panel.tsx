@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { FiArchive, FiClock, FiCopy, FiEdit3, FiEye, FiEyeOff, FiFolder, FiPlus, FiRefreshCw, FiSave, FiStar, FiTrash2, FiX } from "react-icons/fi";
+import {
+  FiAlertTriangle, FiArchive, FiArrowLeft, FiBookmark, FiCheckSquare, FiChevronDown, FiChevronLeft, FiChevronRight, FiClock, FiCode,
+  FiCopy, FiCpu, FiCreditCard, FiDatabase, FiEdit3, FiEye, FiEyeOff, FiFileText, FiFilter, FiFolder, FiGlobe, FiGrid, FiHash, FiKey, FiList,
+  FiLock, FiMoreVertical, FiPlus, FiRefreshCw, FiSave, FiSearch,
+  FiServer, FiSettings, FiShield, FiStar, FiTrash2, FiUnlock, FiUser, FiWifi, FiX,
+} from "react-icons/fi";
 import MDEditor from "@uiw/react-md-editor/nohighlight";
 import { toast } from "sonner";
 
@@ -14,6 +19,17 @@ import {
   getDefaultPayloadForType,
   updateVaultItem,
 } from "~/lib/vault-items.client";
+import {
+  changeNoteExtraPassword,
+  decryptNote,
+  decryptNoteTitle,
+  encryptNote,
+  protectNote,
+  removeNoteExtraPassword,
+  unlockProtectedNoteKey,
+} from "~/lib/notes.client";
+import type { EncryptedNote, EncryptedNoteSummary } from "~/lib/notes";
+import { extractTasks, getLocalAICapabilities, suggestTitle, summarizeText, type LocalAICapabilities } from "~/lib/local-ai.client";
 import {
   VAULT_ITEM_LABELS,
   VAULT_ITEM_TYPES,
@@ -44,26 +60,85 @@ const FIELD_LABELS: Record<string, string> = {
   templateType: "Template type",
 };
 
-export function VaultItemsPanel({ onClose }: { onClose: () => void }) {
+type VaultView = "all" | "favorites" | "recent" | "archive" | "uncategorized";
+type SortMode = "updated-desc" | "updated-asc" | "created-desc" | "title-asc";
+const PRIMARY_TYPES: VaultItemType[] = [
+  "note",
+  "password",
+  "secret",
+  "server",
+  "database",
+  "credit_card",
+  "identity",
+  "code_snippet",
+];
+const PRIMARY_TAG_LIMIT = 5;
+const VAULT_ITEM_DESCRIPTIONS: Record<VaultItemType, string> = {
+  note: "Información y contenido personal",
+  password: "Guarda un inicio de sesión",
+  secure_note: "Información privada protegida",
+  secret: "Valor confidencial cifrado",
+  server: "Información de servidor",
+  database: "Conexión y acceso a base de datos",
+  software_license: "Licencia y clave de software",
+  wifi: "Credenciales de red WiFi",
+  credit_card: "Información de tarjeta",
+  identity: "Documento e información de identidad",
+  recovery_codes: "Códigos de recuperación",
+  bookmark: "Enlace guardado",
+  code_snippet: "Fragmento de código",
+  checklist: "Lista de tareas",
+  template: "Plantilla reutilizable",
+};
+type UnifiedItem = VaultItem & {
+  source: "vault" | "note";
+  noteSummary?: EncryptedNoteSummary;
+};
+
+interface LegacyNoteDraft {
+  encrypted: EncryptedNote;
+  contentKey: CryptoKey | null;
+  title: string;
+  content: string;
+  pinned: boolean;
+  archived: boolean;
+}
+type NoteProtectionAction = "protect" | "change" | "remove";
+
+export function VaultItemsPanel({ email = "" }: { email?: string; onClose?: () => void }) {
   const { masterKey } = useVault();
   const workspace = useWorkspace();
   const folderState = useFolders();
   const [encryptedItems, setEncryptedItems] = useState<EncryptedVaultItem[]>([]);
   const [items, setItems] = useState<VaultItem[]>([]);
+  const [notes, setNotes] = useState<EncryptedNoteSummary[]>([]);
+  const [noteTitles, setNoteTitles] = useState<Record<string, string>>({});
+  const [legacyDraft, setLegacyDraft] = useState<LegacyNoteDraft | null>(null);
+  const [protectedNote, setProtectedNote] = useState<EncryptedNote | null>(null);
+  const [protectionAction, setProtectionAction] = useState<NoteProtectionAction | null>(null);
+  const [localAIOpen, setLocalAIOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState<VaultItem | null>(null);
   const [filter, setFilter] = useState<VaultItemType | "all">(workspace.activeTypeFilter as VaultItemType | "all" || "all");
-  const [view, setView] = useState<"all" | "favorites" | "recent" | "archive" | "uncategorized">("all");
+  const [view, setView] = useState<VaultView>("all");
   const [activeFolderId, setActiveFolderId] = useState<string | null>(workspace.activeFolderId);
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const [folderDialog, setFolderDialog] = useState<{ mode: "create" | "rename"; folder?: Folder; parentFolderId?: string | null } | null>(null);
   const [deleteFolder, setDeleteFolder] = useState<Folder | null>(null);
   const [query, setQuery] = useState("");
-  const [creating, setCreating] = useState(false);
   const [working, setWorking] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [filterDialogOpen, setFilterDialogOpen] = useState(false);
+  const [sortMode, setSortMode] = useState<SortMode>("updated-desc");
+  const [displayMode, setDisplayMode] = useState<"list" | "grid">("list");
+  const [newItemOpen, setNewItemOpen] = useState(false);
+  const [moreTypesOpen, setMoreTypesOpen] = useState(false);
+  const [moreTagsOpen, setMoreTagsOpen] = useState(false);
 
   useEffect(() => {
-    void loadItems();
+    void Promise.all([loadItems(), loadNotes()]);
   }, []);
 
   useEffect(() => {
@@ -74,10 +149,18 @@ export function VaultItemsPanel({ onClose }: { onClose: () => void }) {
   }, [encryptedItems, masterKey]);
 
   useEffect(() => {
-    if (!workspace.activeItemId || selectedId || !items.length) return;
-    const restored = items.find((item) => item.id === workspace.activeItemId);
-    if (restored) selectItem(restored);
-  }, [items, selectedId, workspace.activeItemId]);
+    if (!masterKey) return;
+    Promise.all(notes.map(async (note) => [
+      note.id,
+      note.isCritical
+        ? "Critical note"
+        : note.hasExtraPassword
+          ? "Protected note"
+          : await decryptNoteTitle(note, masterKey),
+    ] as const))
+      .then((entries) => setNoteTitles(Object.fromEntries(entries)))
+      .catch(() => toast.error("Note titles could not be decrypted."));
+  }, [masterKey, notes]);
 
   async function loadItems() {
     const response = await fetch("/api/vault-items");
@@ -86,9 +169,17 @@ export function VaultItemsPanel({ onClose }: { onClose: () => void }) {
     setEncryptedItems(result.items);
   }
 
+  async function loadNotes() {
+    const response = await fetch("/api/notes");
+    if (!response.ok) return toast.error("Notes could not be loaded.");
+    const result = await response.json() as { notes: EncryptedNoteSummary[] };
+    setNotes(result.notes);
+  }
+
   function startCreate(type: VaultItemType) {
-    setCreating(false);
+    setNewItemOpen(false);
     setSelectedId(null);
+    setLegacyDraft(null);
     setDraft({
       id: "",
       type,
@@ -102,12 +193,191 @@ export function VaultItemsPanel({ onClose }: { onClose: () => void }) {
       createdAt: "",
       updatedAt: "",
     });
+    setEditing(true);
+    setDetailOpen(true);
   }
 
   function selectItem(item: VaultItem) {
     setSelectedId(item.id);
+    setLegacyDraft(null);
     setDraft(structuredClone(item));
     workspace.openItem(item.id);
+    setEditing(false);
+    setDetailOpen(true);
+  }
+
+  async function selectLegacyNote(item: UnifiedItem) {
+    if (!masterKey || !item.noteSummary) return;
+    setWorking(true);
+    try {
+      const response = await fetch(`/api/notes/${item.id}`);
+      const result = await response.json() as { note?: EncryptedNote; confirmUrl?: string };
+      if (response.status === 428) {
+        window.location.assign(result.confirmUrl ?? "/auth/2fa/confirm");
+        return;
+      }
+      if (!response.ok || !result.note) throw new Error();
+      if (result.note.hasExtraPassword) {
+        setProtectedNote(result.note);
+        return;
+      }
+      await openLegacyNote(result.note);
+    } catch {
+      toast.error("The note could not be opened.");
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function openLegacyNote(note: EncryptedNote, noteKey?: CryptoKey) {
+    if (!masterKey) return;
+    const plain = await decryptNote(note, masterKey, noteKey);
+    setSelectedId(note.id);
+    setDraft(null);
+    setLegacyDraft({
+      encrypted: note,
+      contentKey: noteKey ?? null,
+      ...plain,
+      pinned: note.pinned,
+      archived: note.archived,
+    });
+    workspace.openNote(note.id);
+    setEditing(false);
+    setDetailOpen(true);
+  }
+
+  async function unlockLegacyNote(password: string) {
+    if (!protectedNote) return;
+    setWorking(true);
+    try {
+      const noteKey = await unlockProtectedNoteKey(protectedNote, password);
+      await openLegacyNote(protectedNote, noteKey);
+      setProtectedNote(null);
+    } catch {
+      toast.error("The password is incorrect.");
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function saveLegacyNote(nextDraft = legacyDraft) {
+    if (!nextDraft || !masterKey) return;
+    setWorking(true);
+    try {
+      const input = await encryptNote(
+        { title: nextDraft.title, content: nextDraft.content },
+        nextDraft.contentKey ?? masterKey,
+        { pinned: nextDraft.pinned, archived: nextDraft.archived },
+        nextDraft.encrypted.hasExtraPassword
+          ? {
+              extraPasswordSalt: nextDraft.encrypted.extraPasswordSalt!,
+              extraPasswordEncryptedNoteKey: nextDraft.encrypted.extraPasswordEncryptedNoteKey!,
+              extraPasswordNoteKeyIv: nextDraft.encrypted.extraPasswordNoteKeyIv!,
+            }
+          : undefined,
+      );
+      const response = await fetch(`/api/notes/${nextDraft.encrypted.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      });
+      if (!response.ok) throw new Error();
+      const result = await response.json() as { note: EncryptedNote };
+      setLegacyDraft({ ...nextDraft, encrypted: result.note });
+      setNotes((current) => current.map((note) => note.id === result.note.id ? result.note : note));
+      setNoteTitles((current) => ({ ...current, [result.note.id]: nextDraft.title || "Untitled" }));
+      setEditing(false);
+      toast.success("Note saved");
+    } catch {
+      toast.error("The note could not be saved.");
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function updateLegacyMetadata(changes: Partial<Pick<LegacyNoteDraft, "pinned" | "archived">>) {
+    if (!legacyDraft) return;
+    const next = { ...legacyDraft, ...changes };
+    setLegacyDraft(next);
+    await saveLegacyNote(next);
+  }
+
+  async function moveLegacyNote(folderId: string | null) {
+    if (!legacyDraft) return;
+    const response = await fetch(`/api/notes/${legacyDraft.encrypted.id}/folder`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ folderId }),
+    });
+    if (!response.ok) return toast.error("The note could not be moved.");
+    const { note } = await response.json() as { note: EncryptedNoteSummary };
+    setLegacyDraft({ ...legacyDraft, encrypted: { ...legacyDraft.encrypted, ...note } });
+    setNotes((current) => current.map((item) => item.id === note.id ? note : item));
+    toast.success("Note moved");
+  }
+
+  async function setLegacyCritical(isCritical: boolean) {
+    if (!legacyDraft) return;
+    const response = await fetch(`/api/notes/${legacyDraft.encrypted.id}/critical`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ isCritical }),
+    });
+    const result = await response.json() as { note?: EncryptedNoteSummary; confirmUrl?: string };
+    if (response.status === 428) return window.location.assign(result.confirmUrl ?? "/auth/2fa/confirm");
+    if (!response.ok || !result.note) return toast.error("Critical mode could not be updated.");
+    setLegacyDraft({ ...legacyDraft, encrypted: { ...legacyDraft.encrypted, ...result.note } });
+    setNotes((current) => current.map((item) => item.id === result.note!.id ? result.note! : item));
+    toast.success(isCritical ? "Note marked as critical" : "Critical mode removed");
+  }
+
+  function confirmDeleteLegacyNote() {
+    toast.warning("Permanently delete this note?", {
+      duration: Infinity,
+      description: "This action cannot be undone.",
+      action: { label: "Delete", onClick: () => void deleteLegacyNote() },
+      cancel: { label: "Cancel", onClick: () => undefined },
+    });
+  }
+
+  async function deleteLegacyNote() {
+    if (!legacyDraft) return;
+    const id = legacyDraft.encrypted.id;
+    const response = await fetch(`/api/notes/${id}`, { method: "DELETE" });
+    if (!response.ok) return toast.error("The note could not be deleted.");
+    setNotes((current) => current.filter((note) => note.id !== id));
+    setLegacyDraft(null);
+    setSelectedId(null);
+    setDetailOpen(false);
+    workspace.closeNote(id);
+    toast.success("Note deleted");
+  }
+
+  async function handleProtectionAction(currentPassword: string, newPassword: string) {
+    if (!legacyDraft || !masterKey || !protectionAction) return;
+    setWorking(true);
+    try {
+      const result = protectionAction === "protect"
+        ? await protectNote({ title: legacyDraft.title, content: legacyDraft.content }, newPassword, legacyDraft)
+        : protectionAction === "change"
+          ? await changeNoteExtraPassword(legacyDraft.encrypted, currentPassword, newPassword)
+          : { input: await removeNoteExtraPassword(legacyDraft.encrypted, currentPassword, masterKey), noteKey: null };
+      const response = await fetch(`/api/notes/${legacyDraft.encrypted.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(result.input),
+      });
+      if (!response.ok) throw new Error();
+      const { note } = await response.json() as { note: EncryptedNote };
+      setLegacyDraft({ ...legacyDraft, encrypted: note, contentKey: result.noteKey });
+      setNotes((current) => current.map((item) => item.id === note.id ? note : item));
+      setProtectionAction(null);
+      toast.success(protectionAction === "remove" ? "Protection removed" : "Protection updated");
+    } catch {
+      toast.error("The operation could not be completed. Check the password.");
+    } finally {
+      setWorking(false);
+    }
   }
 
   async function save() {
@@ -163,7 +433,26 @@ export function VaultItemsPanel({ onClose }: { onClose: () => void }) {
     toast.success("Vault item deleted");
   }
 
-  const filtered = useMemo(() => items.filter((item) => {
+  const unifiedItems = useMemo<UnifiedItem[]>(() => [
+    ...items.map((item) => ({ ...item, source: "vault" as const })),
+    ...notes.map((note) => ({
+      id: note.id,
+      source: "note" as const,
+      noteSummary: note,
+      type: "note" as const,
+      folderId: note.folderId,
+      title: noteTitles[note.id] ?? "Decrypting...",
+      payload: { markdown: "" },
+      tags: [],
+      favorite: note.pinned,
+      pinned: note.pinned,
+      archived: note.archived,
+      createdAt: note.createdAt,
+      updatedAt: note.updatedAt,
+    })),
+  ], [items, noteTitles, notes]);
+
+  const filtered = useMemo(() => unifiedItems.filter((item) => {
     if ((view === "all" || view === "recent") && item.archived) return false;
     if (view === "favorites" && (!item.favorite || item.archived)) return false;
     if (view === "archive" && !item.archived) return false;
@@ -175,8 +464,25 @@ export function VaultItemsPanel({ onClose }: { onClose: () => void }) {
     const folderName = folderState.folders.find((folder) => folder.id === item.folderId)?.name ?? "";
     return JSON.stringify([item.title, item.tags, item.payload, folderName])
       .toLocaleLowerCase().includes(query.trim().toLocaleLowerCase());
-  }).sort((left, right) => view === "recent" ? Date.parse(right.updatedAt) - Date.parse(left.updatedAt) : 0), [activeFolderId, activeTag, filter, folderState.folders, items, query, view]);
-  const tags = useMemo(() => Array.from(new Set(items.flatMap((item) => item.tags))).sort(), [items]);
+  }).sort((left, right) => {
+    if (sortMode === "updated-asc") return Date.parse(left.updatedAt) - Date.parse(right.updatedAt);
+    if (sortMode === "created-desc") return Date.parse(right.createdAt) - Date.parse(left.createdAt);
+    if (sortMode === "title-asc") return left.title.localeCompare(right.title);
+    return Date.parse(right.updatedAt) - Date.parse(left.updatedAt);
+  }), [activeFolderId, activeTag, filter, folderState.folders, query, sortMode, unifiedItems, view]);
+  const tagCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    items.forEach((item) => {
+      if (item.archived) return;
+      item.tags.forEach((tag) => counts.set(tag, (counts.get(tag) ?? 0) + 1));
+    });
+    return Array.from(counts.entries()).sort(([leftTag, leftCount], [rightTag, rightCount]) =>
+      rightCount - leftCount || leftTag.localeCompare(rightTag),
+    );
+  }, [items]);
+  const tags = useMemo(() => tagCounts.map(([tag]) => tag), [tagCounts]);
+  const primaryTags = tags.slice(0, PRIMARY_TAG_LIMIT);
+  const secondaryTags = tags.slice(PRIMARY_TAG_LIMIT);
   const activeFolder = folderState.folders.find((folder) => folder.id === activeFolderId);
   const breadcrumbs = folderBreadcrumbs(folderState.folders, activeFolderId);
 
@@ -190,58 +496,93 @@ export function VaultItemsPanel({ onClose }: { onClose: () => void }) {
     workspace.setOrganizationState({ activeFolderId: folderId });
   }
 
+  const activeGroupTitle = activeTag
+    ? `#${activeTag}`
+    : activeFolder?.name
+      ?? (filter !== "all" ? VAULT_ITEM_LABELS[filter] : {
+        all: "All Items",
+        favorites: "Favorites",
+        recent: "Recent",
+        archive: "Archive",
+        uncategorized: "Uncategorized",
+      }[view]);
+
+  const chooseGroup = (nextView: VaultView, options?: { folderId?: string | null; tag?: string | null; type?: VaultItemType | "all" }) => {
+    setView(nextView);
+    chooseFolder(options?.folderId ?? null);
+    setActiveTag(options?.tag ?? null);
+    chooseType(options?.type ?? "all");
+    setSidebarOpen(false);
+    setDetailOpen(false);
+  };
+
   return (
-    <div className="fixed inset-0 z-[2500] flex bg-black/60 p-2 sm:p-6">
-      <section className="mx-auto flex min-h-0 w-full max-w-6xl overflow-hidden rounded-xl border border-zinc-300 bg-white shadow-2xl dark:border-zinc-700 dark:bg-zinc-950">
-        <aside className="flex w-72 shrink-0 flex-col border-r border-zinc-200 p-3 dark:border-zinc-800">
-          <div className="flex items-center justify-between">
-            <h2 className="font-semibold">Personal Vault</h2>
-            <button type="button" onClick={() => setCreating((value) => !value)} className="rounded-md bg-blue-600 p-2 text-white" aria-label="New vault item"><FiPlus /></button>
+    <div className={`vault-shell ${workspace.sidebarCollapsed ? "sidebar-collapsed" : ""} ${detailOpen ? "detail-open" : ""}`}>
+      <header className="vault-topbar">
+        <button type="button" className="vault-topbar-brand" onClick={() => setSidebarOpen(true)} aria-label="Open navigation"><img src="/icon.svg" alt="" /><strong>Notes</strong></button>
+        <label className="vault-search"><FiSearch /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search vault..." /><kbd>⌘ K</kbd></label>
+        <div className="vault-topbar-actions ml-auto">
+          <button type="button" className="vault-new-button" onClick={() => setNewItemOpen((value) => !value)}><span><FiPlus /> New item</span><i><FiChevronDown /></i></button>
+          <span className="vault-topbar-divider" />
+          <button type="button" className="vault-topbar-action" aria-label="Lock vault"><FiLock /></button>
+          <span className="vault-topbar-divider" />
+          <a href="/settings/appearance" className="vault-topbar-action" aria-label="Settings"><FiSettings /></a>
+          <span className="vault-topbar-divider" />
+          <span className="vault-avatar">{email.slice(0, 1).toUpperCase() || "N"}</span>
+        </div>
+        {newItemOpen ? <div className="vault-new-menu"><NewItemMenu onCreate={startCreate} /></div> : null}
+      </header>
+      {sidebarOpen ? <button className="vault-overlay" aria-label="Close navigation" onClick={() => setSidebarOpen(false)} /> : null}
+      <aside className={`vault-sidebar ${sidebarOpen ? "is-open" : ""} ${workspace.sidebarCollapsed ? "is-collapsed" : ""}`}>
+        <nav className="vault-nav-scroll">
+          <VaultNavButton active={view === "all" && activeFolderId === null && !activeTag && filter === "all"} icon={<FiGrid />} label="All Items" count={unifiedItems.filter((item) => !item.archived).length} onClick={() => chooseGroup("all")} />
+          <VaultNavButton active={view === "favorites"} icon={<FiStar />} label="Favorites" count={unifiedItems.filter((item) => item.favorite && !item.archived).length} onClick={() => chooseGroup("favorites")} />
+          <VaultNavButton active={view === "recent"} icon={<FiClock />} label="Recent" count={unifiedItems.filter((item) => !item.archived).length} onClick={() => chooseGroup("recent")} />
+          <VaultNavButton active={view === "archive"} icon={<FiArchive />} label="Archive" count={unifiedItems.filter((item) => item.archived).length} onClick={() => chooseGroup("archive")} />
+          <SectionTitle label="Folders" action={() => setFolderDialog({ mode: "create", parentFolderId: activeFolderId })} />
+          <VaultNavButton active={view === "uncategorized"} icon={<FiFolder />} label="Uncategorized" count={unifiedItems.filter((item) => !item.archived && item.folderId === null).length} onClick={() => chooseGroup("uncategorized")} />
+          <FolderTree folders={folderState.folders} activeFolderId={activeFolderId} counts={Object.fromEntries(folderState.folders.map((folder) => [folder.id, unifiedItems.filter((item) => !item.archived && item.folderId === folder.id).length]))} onSelect={(id) => chooseGroup("all", { folderId: id })} onRename={(folder) => setFolderDialog({ mode: "rename", folder })} onDelete={setDeleteFolder} />
+          <SectionTitle label="Types" />
+          {PRIMARY_TYPES.map((type) => <VaultNavButton key={type} active={filter === type} icon={<TypeIcon type={type} />} label={VAULT_ITEM_LABELS[type]} count={unifiedItems.filter((item) => !item.archived && item.type === type).length} onClick={() => chooseGroup("all", { type })} />)}
+          <VaultNavButton active={VAULT_ITEM_TYPES.some((type) => !PRIMARY_TYPES.includes(type) && filter === type)} icon={<FiChevronDown className={moreTypesOpen ? "rotate-180" : ""} />} label="More" onClick={() => setMoreTypesOpen((value) => !value)} />
+          {moreTypesOpen ? <div className="vault-more-types">{VAULT_ITEM_TYPES.filter((type) => !PRIMARY_TYPES.includes(type)).map((type) => <VaultNavButton key={type} active={filter === type} icon={<TypeIcon type={type} />} label={VAULT_ITEM_LABELS[type]} count={unifiedItems.filter((item) => !item.archived && item.type === type).length} onClick={() => chooseGroup("all", { type })} />)}</div> : null}
+          {tags.length ? <><SectionTitle label="Tags" />
+            {primaryTags.map((tag) => <VaultNavButton key={tag} active={activeTag === tag} icon={<FiHash />} label={tag} count={tagCounts.find(([value]) => value === tag)?.[1] ?? 0} onClick={() => chooseGroup("all", { tag })} />)}
+            {secondaryTags.length ? <><VaultNavButton active={secondaryTags.includes(activeTag ?? "")} icon={<FiChevronDown className={moreTagsOpen ? "rotate-180" : ""} />} label="More" onClick={() => setMoreTagsOpen((value) => !value)} />
+              {moreTagsOpen ? <div className="vault-more-tags">{secondaryTags.map((tag) => <VaultNavButton key={tag} active={activeTag === tag} icon={<FiHash />} label={tag} count={tagCounts.find(([value]) => value === tag)?.[1] ?? 0} onClick={() => chooseGroup("all", { tag })} />)}</div> : null}</> : null}
+          </> : null}
+        </nav>
+        <div className="vault-sidebar-footer"><FiLock /><FiRefreshCw /><FiSettings /></div>
+      </aside>
+      <section className={`vault-list-pane ${detailOpen ? "has-detail" : ""}`}>
+        <div className="vault-list-header">
+          <div><h1>{activeGroupTitle}</h1><p>{filtered.length} items</p></div>
+          <div className="ml-auto flex gap-2">
+            <button type="button" className="vault-icon-button" onClick={() => setFilterDialogOpen(true)}><FiFilter /></button>
+            <select value={sortMode} onChange={(event) => setSortMode(event.target.value as SortMode)} className="vault-select"><option value="updated-desc">Updated</option><option value="updated-asc">Oldest updated</option><option value="created-desc">Created</option><option value="title-asc">Title</option></select>
+            <div className="vault-segment"><button type="button" className={displayMode === "list" ? "active" : ""} onClick={() => setDisplayMode("list")}><FiList /></button><button type="button" className={displayMode === "grid" ? "active" : ""} onClick={() => setDisplayMode("grid")}><FiGrid /></button></div>
           </div>
-          {creating ? <NewItemMenu onCreate={startCreate} /> : null}
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search locally" className="mt-3 rounded-md bg-zinc-100 px-3 py-2 text-sm outline-none dark:bg-zinc-800" />
-          <nav className="mt-3 space-y-1">
-            <VaultNavButton active={view === "all" && activeFolderId === null && !activeTag} icon={<FiFolder />} label="All Items" onClick={() => { setView("all"); chooseFolder(null); setActiveTag(null); }} />
-            <VaultNavButton active={view === "favorites"} icon={<FiStar />} label="Favorites" onClick={() => { setView("favorites"); chooseFolder(null); setActiveTag(null); }} />
-            <VaultNavButton active={view === "recent"} icon={<FiClock />} label="Recent" onClick={() => { setView("recent"); chooseFolder(null); setActiveTag(null); }} />
-            <VaultNavButton active={view === "archive"} icon={<FiArchive />} label="Archive" onClick={() => { setView("archive"); chooseFolder(null); setActiveTag(null); }} />
-          </nav>
-          <div className="mt-4 flex items-center justify-between">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Folders</p>
-            <button type="button" onClick={() => setFolderDialog({ mode: "create", parentFolderId: activeFolderId })} aria-label="Create folder" className="rounded p-1 hover:bg-zinc-100 dark:hover:bg-zinc-800"><FiPlus /></button>
-          </div>
-          <VaultNavButton active={view === "uncategorized"} icon={<FiFolder />} label="Uncategorized" onClick={() => { setView("uncategorized"); chooseFolder(null); setActiveTag(null); }} />
-          <FolderTree folders={folderState.folders} activeFolderId={activeFolderId} onSelect={(id) => { setView("all"); chooseFolder(id); setActiveTag(null); }} onRename={(folder) => setFolderDialog({ mode: "rename", folder })} onDelete={setDeleteFolder} />
-          <p className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Types</p>
-          <select value={filter} onChange={(event) => chooseType(event.target.value as VaultItemType | "all")} className="mt-1 w-full rounded-md border border-zinc-300 bg-transparent px-2 py-2 text-sm dark:border-zinc-700">
-            <option value="all">All types</option>
-            {VAULT_ITEM_TYPES.map((type) => <option key={type} value={type}>{VAULT_ITEM_LABELS[type]}</option>)}
-          </select>
-          {tags.length ? <><p className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Tags</p><div className="mt-1 flex max-h-20 flex-wrap gap-1 overflow-y-auto">{tags.map((tag) => <button type="button" key={tag} onClick={() => { setActiveTag(activeTag === tag ? null : tag); chooseFolder(null); }} className={`rounded-full px-2 py-1 text-[11px] ${activeTag === tag ? "bg-blue-600 text-white" : "bg-zinc-100 dark:bg-zinc-800"}`}>#{tag}</button>)}</div></> : null}
-          <div className="mt-3 min-h-0 flex-1 overflow-y-auto">
-            {filtered.map((item) => (
-              <button key={item.id} type="button" onClick={() => selectItem(item)} className={`mb-1 block w-full rounded-md px-3 py-2 text-left ${selectedId === item.id ? "bg-blue-600 text-white" : "hover:bg-zinc-100 dark:hover:bg-zinc-800"}`}>
-                <span className="block truncate text-sm font-medium">{item.title || "Untitled"}</span>
-                <span className="text-xs opacity-60">{VAULT_ITEM_LABELS[item.type]}</span>
-              </button>
-            ))}
-          </div>
-        </aside>
-        <main className="min-w-0 flex-1 overflow-y-auto p-4 sm:p-6">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-semibold">{draft ? VAULT_ITEM_LABELS[draft.type] : "Encrypted vault items"}</h2>
-              <ItemBreadcrumbs folders={breadcrumbs} activeTag={activeTag} />
-            </div>
-            <button type="button" onClick={onClose} className="rounded-md p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800" aria-label="Close vault"><FiX /></button>
-          </div>
-          {draft ? (
-            <VaultItemForm draft={draft} setDraft={setDraft} folders={folderState.folders} working={working} onSave={() => void save()} onDelete={selectedId ? confirmDelete : undefined} />
-          ) : (
-            <div className="grid min-h-80 place-items-center text-sm text-zinc-500">Create or select a vault item.</div>
-          )}
-        </main>
+        </div>
+        <div className={displayMode === "grid" ? "vault-item-grid" : "vault-item-list"}>
+          {filtered.map((item) => <VaultListItem key={`${item.source}-${item.id}`} item={item} selected={selectedId === item.id} onSelect={() => item.source === "note" ? void selectLegacyNote(item) : selectItem(item)} />)}
+          {!filtered.length ? <div className="vault-empty">No items in this group.</div> : null}
+        </div>
       </section>
+      {draft ? <main className={`vault-detail ${detailOpen ? "is-open" : ""}`}>
+        <button type="button" onClick={() => setDetailOpen(false)} className="vault-back"><FiArrowLeft /> Back to {activeGroupTitle}</button>
+        {editing
+          ? <div className="vault-detail-scroll"><div className={`vault-edit-heading ${draft.type === "password" ? "is-password" : ""}`}><VaultItemEditIntro type={draft.type} /><button type="button" onClick={() => setEditing(false)} className="vault-secondary-button">Cancel</button></div><VaultItemForm draft={draft} setDraft={setDraft} folders={folderState.folders} working={working} creating={!selectedId} onSave={() => void save().then(() => setEditing(false))} onDelete={selectedId ? confirmDelete : undefined} /></div>
+          : <VaultItemPreview item={draft} folders={breadcrumbs} onEdit={() => setEditing(true)} onFavorite={() => setDraft({ ...draft, favorite: !draft.favorite })} />}
+      </main> : null}
+      {legacyDraft ? <main className={`vault-detail ${detailOpen ? "is-open" : ""}`}>
+        <button type="button" onClick={() => setDetailOpen(false)} className="vault-back"><FiArrowLeft /> Back to {activeGroupTitle}</button>
+        <LegacyNoteDetail note={legacyDraft} editing={editing} working={working} folders={folderState.folders} onEdit={() => setEditing(true)} onCancel={() => setEditing(false)} onChange={setLegacyDraft} onSave={() => void saveLegacyNote()} onPin={() => void updateLegacyMetadata({ pinned: !legacyDraft.pinned })} onArchive={() => void updateLegacyMetadata({ archived: !legacyDraft.archived })} onFolder={(folderId) => void moveLegacyNote(folderId)} onCritical={() => void setLegacyCritical(!legacyDraft.encrypted.isCritical)} onProtection={setProtectionAction} onDelete={confirmDeleteLegacyNote} onLocalAI={() => setLocalAIOpen(true)} />
+      </main> : null}
+      <button type="button" title={workspace.sidebarCollapsed ? "Show sidebar" : "Hide sidebar"} aria-label={workspace.sidebarCollapsed ? "Show sidebar" : "Hide sidebar"} onClick={() => workspace.setSidebarCollapsed(!workspace.sidebarCollapsed)} className="vault-sidebar-toggle">{workspace.sidebarCollapsed ? <FiChevronRight /> : <FiChevronLeft />}</button>
+      {filterDialogOpen ? <FilterDialog type={filter} folderId={activeFolderId} tag={activeTag} folders={folderState.folders} tags={tags} onClose={() => setFilterDialogOpen(false)} onApply={(next) => { setFilter(next.type); setActiveFolderId(next.folderId); setActiveTag(next.tag); setFilterDialogOpen(false); }} /> : null}
+      {protectedNote ? <ProtectedNoteDialog working={working} onClose={() => setProtectedNote(null)} onUnlock={(password) => void unlockLegacyNote(password)} /> : null}
+      {protectionAction ? <NoteProtectionDialog mode={protectionAction} working={working} onClose={() => setProtectionAction(null)} onSubmit={(currentPassword, newPassword) => void handleProtectionAction(currentPassword, newPassword)} /> : null}
+      {localAIOpen && legacyDraft ? <LocalAINoteDialog note={legacyDraft} onClose={() => setLocalAIOpen(false)} onChange={(changes) => { const next = { ...legacyDraft, ...changes }; setLegacyDraft(next); void saveLegacyNote(next); }} /> : null}
       {folderDialog ? <FolderDialog mode={folderDialog.mode} folder={folderDialog.folder} defaultParentFolderId={folderDialog.parentFolderId} folders={folderState.folders} onClose={() => setFolderDialog(null)} onSubmit={async (name, parentFolderId) => {
         try {
           if (folderDialog.mode === "rename" && folderDialog.folder) {
@@ -262,34 +603,274 @@ export function VaultItemsPanel({ onClose }: { onClose: () => void }) {
 }
 
 function NewItemMenu({ onCreate }: { onCreate: (type: VaultItemType) => void }) {
-  return <div className="mt-2 max-h-56 overflow-y-auto rounded-md border border-zinc-200 p-1 dark:border-zinc-700">
+  return <div className="max-h-72 overflow-y-auto p-1">
     {VAULT_ITEM_TYPES.map((type) => <button key={type} type="button" onClick={() => onCreate(type)} className="block w-full rounded px-2 py-1.5 text-left text-xs hover:bg-zinc-100 dark:hover:bg-zinc-800">New {VAULT_ITEM_LABELS[type].toLocaleLowerCase()}</button>)}
   </div>;
 }
 
-function VaultNavButton({ active, icon, label, onClick }: { active: boolean; icon: React.ReactNode; label: string; onClick: () => void }) {
-  return <button type="button" onClick={onClick} className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs ${active ? "bg-zinc-200 font-semibold dark:bg-zinc-800" : "hover:bg-zinc-100 dark:hover:bg-zinc-800"}`}>{icon}{label}</button>;
+function SectionTitle({ label, action }: { label: string; action?: () => void }) {
+  return <div className="vault-section-title"><span>{label}</span>{action ? <button type="button" onClick={action} aria-label={`Add ${label}`}><FiPlus /></button> : null}</div>;
 }
 
-function FolderTree({ folders, activeFolderId, onSelect, onRename, onDelete }: {
+function VaultNavButton({ active, icon, label, count, onClick }: { active: boolean; icon: React.ReactNode; label: string; count?: number; onClick: () => void }) {
+  return <button type="button" onClick={onClick} className={`vault-nav-button ${active ? "active" : ""}`}><span className="vault-nav-icon">{icon}</span><span className="truncate">{label}</span>{count !== undefined ? <span className="ml-auto text-xs text-slate-400">{count}</span> : null}</button>;
+}
+
+function TypeIcon({ type }: { type: VaultItemType }) {
+  if (type === "password" || type === "secret" || type === "recovery_codes") return <FiKey />;
+  if (type === "server") return <FiServer />;
+  if (type === "database") return <FiDatabase />;
+  if (type === "identity") return <FiUser />;
+  if (type === "secure_note") return <FiShield />;
+  if (type === "credit_card") return <FiCreditCard />;
+  if (type === "wifi") return <FiWifi />;
+  if (type === "bookmark") return <FiBookmark />;
+  if (type === "code_snippet") return <FiCode />;
+  if (type === "checklist") return <FiCheckSquare />;
+  if (type === "software_license") return <FiKey />;
+  return <FiFileText />;
+}
+
+function VaultItemEditIntro({ type }: { type: VaultItemType }) {
+  return <div className="vault-item-edit-intro">
+    <span className={`type-${type}`}><TypeIcon type={type} /></span>
+    <div><h2>{VAULT_ITEM_LABELS[type]}</h2><p>{VAULT_ITEM_DESCRIPTIONS[type]}</p></div>
+  </div>;
+}
+
+function ItemVisual({ type, payload, large = false }: { type: VaultItemType; payload: Record<string, unknown>; large?: boolean }) {
+  const [failed, setFailed] = useState(false);
+  const faviconUrl = type === "password" ? getFaviconUrl(String(payload.url ?? "")) : null;
+  useEffect(() => setFailed(false), [faviconUrl]);
+  const className = large ? "vault-preview-icon" : "vault-type-tile";
+  if (faviconUrl && !failed) {
+    return <span className={`${className} vault-favicon`}><img src={faviconUrl} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(true)} /></span>;
+  }
+  return <span className={`${className} type-${type}`}><TypeIcon type={type} /></span>;
+}
+
+function getFaviconUrl(value: string) {
+  const candidate = value.trim();
+  if (!candidate) return null;
+  try {
+    const url = new URL(candidate.includes("://") ? candidate : `https://${candidate}`);
+    if (url.protocol !== "https:") return null;
+    return `${url.origin}/favicon.ico`;
+  } catch {
+    return null;
+  }
+}
+
+function VaultListItem({ item, selected, onSelect }: { item: UnifiedItem; selected: boolean; onSelect: () => void }) {
+  const payload = item.payload as Record<string, unknown>;
+  const subtitle = item.type === "password"
+    ? String(payload.username || payload.url || "Password")
+    : item.type === "server"
+      ? String(payload.host || payload.ip || "Server")
+      : item.type === "database"
+        ? String(payload.host || payload.database || "Database")
+        : item.tags.length ? item.tags.map((tag) => `#${tag}`).join("  ") : VAULT_ITEM_LABELS[item.type];
+  return <button type="button" onClick={onSelect} className={`vault-list-item ${selected ? "active" : ""}`}>
+    <ItemVisual type={item.type} payload={payload} />
+    <span className="min-w-0 flex-1"><span className="flex items-center gap-2"><strong className="truncate">{item.title || "Untitled"}</strong><em>{item.source === "note" ? "Note" : VAULT_ITEM_LABELS[item.type]}</em></span><span className="block truncate text-sm text-slate-400">{item.source === "note" ? "Encrypted note" : subtitle}</span></span>
+    <span className="shrink-0 text-xs text-slate-400">{formatRelativeDate(item.updatedAt)}</span>
+    <FiStar className={item.favorite ? "fill-amber-400 text-amber-400" : "text-slate-400"} />
+  </button>;
+}
+
+function FolderTree({ folders, activeFolderId, counts, onSelect, onRename, onDelete }: {
   folders: Folder[];
   activeFolderId: string | null;
+  counts?: Record<string, number>;
   onSelect: (folderId: string) => void;
   onRename: (folder: Folder) => void;
   onDelete: (folder: Folder) => void;
-}) {
+} & { counts?: Record<string, number> }) {
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set(
+    folders.filter((folder) => folders.some((child) => child.parentFolderId === folder.id)).map((folder) => folder.id),
+  ));
+  const childrenOf = (parentFolderId: string | null) =>
+    folders.filter((folder) => folder.parentFolderId === parentFolderId).sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
+  const toggle = (folderId: string) => setExpanded((current) => {
+    const next = new Set(current);
+    if (next.has(folderId)) next.delete(folderId);
+    else next.add(folderId);
+    return next;
+  });
   const render = (parentFolderId: string | null, depth = 0): React.ReactNode =>
-    folders.filter((folder) => folder.parentFolderId === parentFolderId).sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name)).map((folder) => (
-      <div key={folder.id}>
-        <div style={{ paddingLeft: depth * 12 }} className={`group flex items-center rounded-md ${activeFolderId === folder.id ? "bg-blue-600 text-white" : "hover:bg-zinc-100 dark:hover:bg-zinc-800"}`}>
-          <button type="button" onClick={() => onSelect(folder.id)} className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left text-xs"><FiFolder className="shrink-0" /><span className="truncate">{folder.name}</span></button>
-          <button type="button" onClick={() => onRename(folder)} aria-label={`Manage ${folder.name}`} className="rounded p-1 opacity-0 group-hover:opacity-100"><FiEdit3 /></button>
-          <button type="button" onClick={() => onDelete(folder)} aria-label={`Delete ${folder.name}`} className="rounded p-1 text-red-500 opacity-0 group-hover:opacity-100"><FiTrash2 /></button>
+    childrenOf(parentFolderId).map((folder) => {
+      const children = childrenOf(folder.id);
+      const hasChildren = children.length > 0;
+      const isExpanded = expanded.has(folder.id);
+      return <div key={folder.id} className={`vault-folder-node depth-${Math.min(depth, 4)}`}>
+        <div className={`vault-folder-row group ${activeFolderId === folder.id ? "active" : ""}`}>
+          <button type="button" disabled={!hasChildren} onClick={() => toggle(folder.id)} aria-label={`${isExpanded ? "Collapse" : "Expand"} ${folder.name}`} className={`vault-folder-chevron ${hasChildren ? "" : "invisible"}`}><FiChevronDown className={isExpanded ? "" : "-rotate-90"} /></button>
+          <button type="button" onClick={() => onSelect(folder.id)} className="vault-folder-select"><FiFolder /><span className="truncate">{folder.name}</span>{counts ? <span className="vault-folder-count">{counts[folder.id] ?? 0}</span> : null}</button>
+          <span className="vault-folder-actions"><button type="button" onClick={() => onRename(folder)} aria-label={`Manage ${folder.name}`}><FiEdit3 /></button><button type="button" onClick={() => onDelete(folder)} aria-label={`Delete ${folder.name}`}><FiTrash2 /></button></span>
         </div>
-        {depth < 4 ? render(folder.id, depth + 1) : null}
+        {hasChildren && isExpanded && depth < 4 ? <div className="vault-folder-children">{render(folder.id, depth + 1)}</div> : null}
+      </div>;
+    });
+  return <div className="vault-folder-tree">{render(null)}</div>;
+}
+
+function VaultItemPreview({ item, folders, onEdit, onFavorite }: { item: VaultItem; folders: Folder[]; onEdit: () => void; onFavorite: () => void }) {
+  const [revealed, setRevealed] = useState<Record<string, boolean>>({});
+  const payload = item.payload as Record<string, unknown>;
+  return <div className="vault-detail-scroll">
+    <div className="vault-breadcrumbs"><FiFolder />{folders.length ? folders.map((folder) => folder.name).join("  ›  ") : "Uncategorized"}</div>
+    <header className="vault-preview-header">
+      <ItemVisual type={item.type} payload={payload} large />
+      <div className="min-w-0 flex-1"><h2>{item.title || "Untitled"}</h2><div className="vault-tags"><span className="vault-type-chip">{VAULT_ITEM_LABELS[item.type]}</span>{folders.at(-1) ? <span className="vault-folder-chip">{folders.at(-1)!.name}</span> : null}{item.tags.map((tag) => <span className="vault-tag-chip" key={tag}># {tag}</span>)}</div><p>Updated {formatHumanDate(item.updatedAt)} &nbsp;&nbsp; Created {formatHumanDate(item.createdAt)}</p></div>
+      <button type="button" onClick={onFavorite} className="vault-icon-button"><FiStar className={item.favorite ? "fill-amber-400 text-amber-400" : ""} /></button><button type="button" className="vault-icon-button"><FiMoreVertical /></button>
+    </header>
+    <div className="vault-preview-tabs"><button className="active">Details</button><button>Notes</button><button>History</button><button type="button" className="ml-auto vault-secondary-button" onClick={onEdit}><FiEdit3 /> Edit</button></div>
+    <section className="vault-detail-card">
+      {Object.entries(item.payload).map(([field, rawValue]) => {
+        const sensitive = SENSITIVE_FIELDS.has(field);
+        const value = Array.isArray(rawValue) ? rawValue.map((entry) => typeof entry === "string" ? entry : JSON.stringify(entry)).join("\n") : String(rawValue ?? "");
+        return <div className="vault-preview-field" key={field}><div><span>{FIELD_LABELS[field] ?? field}</span><p className={sensitive && !revealed[field] ? "vault-secret" : ""}>{sensitive && !revealed[field] ? "••••••••••••••" : value || "—"}</p></div><div className="flex gap-2">{sensitive ? <button type="button" className="vault-icon-button" onClick={() => setRevealed((current) => ({ ...current, [field]: !current[field] }))}>{revealed[field] ? <FiEyeOff /> : <FiEye />}</button> : null}<button type="button" className="vault-icon-button" onClick={() => void copySensitiveValue(value).then(() => toast.success("Copied; clipboard will clear in 30 seconds"))}><FiCopy /></button></div></div>;
+      })}
+    </section>
+    <section className="vault-detail-card vault-meta-card"><div><span>Folder</span><p className="vault-folder-value"><FiFolder /> {folders.at(-1)?.name ?? "Uncategorized"}</p></div><div><span>Tags</span><p className="vault-tags">{item.tags.length ? item.tags.map((tag) => <em className="vault-tag-chip" key={tag}># {tag}</em>) : "No tags"}</p></div><div><span>Created</span><p>{formatDateTime(item.createdAt)}</p></div><div><span>Updated</span><p>{formatDateTime(item.updatedAt)}</p></div></section>
+  </div>;
+}
+
+function LegacyNoteDetail({ note, editing, working, folders, onEdit, onCancel, onChange, onSave, onPin, onArchive, onFolder, onCritical, onProtection, onDelete, onLocalAI }: {
+  note: LegacyNoteDraft;
+  editing: boolean;
+  working: boolean;
+  folders: Folder[];
+  onEdit: () => void;
+  onCancel: () => void;
+  onChange: (note: LegacyNoteDraft) => void;
+  onSave: () => void;
+  onPin: () => void;
+  onArchive: () => void;
+  onFolder: (folderId: string | null) => void;
+  onCritical: () => void;
+  onProtection: (mode: NoteProtectionAction) => void;
+  onDelete: () => void;
+  onLocalAI: () => void;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const breadcrumbs = folderBreadcrumbs(folders, note.encrypted.folderId);
+  const copy = () => void navigator.clipboard.writeText(note.content).then(() => toast.success("Note copied"));
+  if (editing) {
+    return <div className="vault-detail-scroll">
+      <div className="vault-edit-heading"><VaultItemEditIntro type="note" /><button type="button" onClick={onCancel} className="vault-secondary-button">Cancel</button></div>
+      <div className="vault-legacy-note-fields">
+        <label>Title<input value={note.title} onChange={(event) => onChange({ ...note, title: event.target.value })} /></label>
+        <label>Folder<select value={note.encrypted.folderId ?? ""} onChange={(event) => onFolder(event.target.value || null)}><option value="">Uncategorized</option>{folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></label>
       </div>
-    ));
-  return <div className="mt-1 max-h-36 overflow-y-auto">{render(null)}</div>;
+      <div className="mt-5" data-color-mode="dark"><MDEditor value={note.content} onChange={(content) => onChange({ ...note, content: content ?? "" })} preview="edit" height={500} /></div>
+      <div className="mt-5 flex flex-wrap items-center gap-4"><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={note.pinned} onChange={(event) => onChange({ ...note, pinned: event.target.checked })} />Favorite</label><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={note.archived} onChange={(event) => onChange({ ...note, archived: event.target.checked })} />Archived</label><button type="button" disabled={working} onClick={onSave} className="vault-primary-button ml-auto"><FiSave /> Save note</button></div>
+    </div>;
+  }
+  return <div className="vault-detail-scroll">
+    <div className="vault-breadcrumbs"><FiFolder />{breadcrumbs.length ? breadcrumbs.map((folder) => folder.name).join("  ›  ") : "Uncategorized"}</div>
+    <header className="vault-preview-header"><span className="vault-preview-icon type-note"><FiFileText /></span><div className="min-w-0 flex-1"><h2>{note.title || "Untitled"}</h2><div className="vault-tags"><span className="vault-type-chip">Note</span>{breadcrumbs.at(-1) ? <span className="vault-folder-chip">{breadcrumbs.at(-1)!.name}</span> : null}{note.encrypted.isCritical ? <span className="vault-tag-chip">Critical</span> : null}</div><p>Updated {formatHumanDate(note.encrypted.updatedAt)} &nbsp;&nbsp; Created {formatHumanDate(note.encrypted.createdAt)}</p></div><button type="button" className="vault-icon-button" onClick={onPin}><FiStar className={note.pinned ? "fill-amber-400 text-amber-400" : "text-slate-400"} /></button><button type="button" className="vault-secondary-button" onClick={onEdit}><FiEdit3 /> Edit</button><div className="vault-note-menu-anchor"><button type="button" className="vault-icon-button" onClick={() => setMenuOpen((value) => !value)}><FiMoreVertical /></button>{menuOpen ? <NoteActionsMenu note={note} folders={folders} working={working} onClose={() => setMenuOpen(false)} onCopy={copy} onPin={onPin} onArchive={onArchive} onFolder={onFolder} onCritical={onCritical} onProtection={onProtection} onDelete={onDelete} onLocalAI={onLocalAI} /> : null}</div></header>
+    <div className="vault-preview-tabs"><button className="active">Note</button><button>History</button></div>
+    <section className="vault-detail-card vault-note-content"><button type="button" title="Copy note" aria-label="Copy note" className="vault-note-content-copy" onClick={copy}><FiCopy /></button>{note.content ? <MDEditor.Markdown source={note.content} /> : <p className="text-slate-400">This note has no content.</p>}</section>
+  </div>;
+}
+
+function NoteActionsMenu({ note, folders, working, onClose, onCopy, onPin, onArchive, onFolder, onCritical, onProtection, onDelete, onLocalAI }: {
+  note: LegacyNoteDraft; folders: Folder[]; working: boolean; onClose: () => void; onCopy: () => void; onPin: () => void; onArchive: () => void; onFolder: (id: string | null) => void; onCritical: () => void; onProtection: (mode: NoteProtectionAction) => void; onDelete: () => void; onLocalAI: () => void;
+}) {
+  const action = (run: () => void) => { run(); onClose(); };
+  return <div className="vault-note-menu">
+    <MenuLabel label="Note" />
+    <MenuAction icon={<FiCopy />} label="Copy" onClick={() => action(onCopy)} />
+    <MenuAction icon={<FiStar />} label={note.pinned ? "Unpin" : "Pin"} onClick={() => action(onPin)} />
+    <MenuAction icon={<FiArchive />} label={note.archived ? "Unarchive" : "Archive"} onClick={() => action(onArchive)} />
+    <label className="vault-menu-folder">Folder<select value={note.encrypted.folderId ?? ""} onChange={(event) => action(() => onFolder(event.target.value || null))}><option value="">Uncategorized</option>{folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></label>
+    <MenuDivider />
+    <MenuLabel label="Intelligence" /><MenuAction icon={<FiCpu />} label="Local AI" onClick={() => action(onLocalAI)} />
+    <MenuDivider />
+    <MenuLabel label="Security" /><MenuAction icon={<FiAlertTriangle />} label={note.encrypted.isCritical ? "Remove critical mode" : "Mark as critical"} disabled={working} onClick={() => action(onCritical)} />
+    {note.encrypted.hasExtraPassword ? <><MenuAction icon={<FiKey />} label="Change password" onClick={() => action(() => onProtection("change"))} /><MenuAction icon={<FiUnlock />} label="Remove protection" onClick={() => action(() => onProtection("remove"))} /></> : <MenuAction icon={<FiShield />} label="Protect note" onClick={() => action(() => onProtection("protect"))} />}
+    <MenuDivider /><MenuLabel label="Danger zone" /><MenuAction danger icon={<FiTrash2 />} label="Delete" onClick={() => action(onDelete)} />
+  </div>;
+}
+
+function MenuLabel({ label }: { label: string }) { return <p className="vault-menu-label">{label}</p>; }
+function MenuDivider() { return <div className="vault-menu-divider" />; }
+function MenuAction({ icon, label, danger, disabled, onClick }: { icon: React.ReactNode; label: string; danger?: boolean; disabled?: boolean; onClick: () => void }) {
+  return <button type="button" disabled={disabled} onClick={onClick} className={`vault-menu-action ${danger ? "danger" : ""}`}>{icon}<span>{label}</span></button>;
+}
+
+function FilterDialog({ type, folderId, tag, folders, tags, onClose, onApply }: { type: VaultItemType | "all"; folderId: string | null; tag: string | null; folders: Folder[]; tags: string[]; onClose: () => void; onApply: (value: { type: VaultItemType | "all"; folderId: string | null; tag: string | null }) => void }) {
+  const [nextType, setNextType] = useState(type);
+  const [nextFolder, setNextFolder] = useState(folderId);
+  const [nextTag, setNextTag] = useState(tag);
+  return <div className="vault-dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="vault-dialog"><header><div><h3>Filter items</h3><p>Combine filters to narrow this group.</p></div><button type="button" className="vault-icon-button" onClick={onClose}><FiX /></button></header><label>Type<select value={nextType} onChange={(event) => setNextType(event.target.value as VaultItemType | "all")}><option value="all">All types</option>{VAULT_ITEM_TYPES.map((value) => <option value={value} key={value}>{VAULT_ITEM_LABELS[value]}</option>)}</select></label><label>Folder<select value={nextFolder ?? ""} onChange={(event) => setNextFolder(event.target.value || null)}><option value="">All folders</option>{folders.map((folder) => <option value={folder.id} key={folder.id}>{folder.name}</option>)}</select></label><label>Tag<select value={nextTag ?? ""} onChange={(event) => setNextTag(event.target.value || null)}><option value="">All tags</option>{tags.map((value) => <option value={value} key={value}># {value}</option>)}</select></label><footer><button type="button" className="vault-secondary-button" onClick={() => { setNextType("all"); setNextFolder(null); setNextTag(null); }}>Clear</button><button type="button" className="vault-primary-button" onClick={() => onApply({ type: nextType, folderId: nextFolder, tag: nextTag })}>Apply filters</button></footer></section></div>;
+}
+
+function ProtectedNoteDialog({ working, onClose, onUnlock }: { working: boolean; onClose: () => void; onUnlock: (password: string) => void }) {
+  const [password, setPassword] = useState("");
+  return <div className="vault-dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><form className="vault-dialog" onSubmit={(event) => { event.preventDefault(); onUnlock(password); }}><header><div><h3>Unlock protected note</h3><p>Enter the additional password for this note.</p></div><button type="button" className="vault-icon-button" onClick={onClose}><FiX /></button></header><label>Password<input autoFocus type="password" value={password} onChange={(event) => setPassword(event.target.value)} className="mt-2 block w-full rounded-lg border border-[#202938] bg-[#0b111a] px-3 py-2.5 text-sm text-white outline-none focus:border-violet-500" /></label><footer><button type="button" className="vault-secondary-button" onClick={onClose}>Cancel</button><button disabled={working || !password} className="vault-primary-button"><FiUnlock /> Unlock</button></footer></form></div>;
+}
+
+function NoteProtectionDialog({ mode, working, onClose, onSubmit }: { mode: NoteProtectionAction; working: boolean; onClose: () => void; onSubmit: (currentPassword: string, newPassword: string) => void }) {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  const needsCurrent = mode !== "protect";
+  const needsNew = mode !== "remove";
+  return <div className="vault-dialog-backdrop"><form className="vault-dialog" onSubmit={(event) => { event.preventDefault(); onSubmit(current, next); }}><header><div><h3>{mode === "protect" ? "Protect note" : mode === "change" ? "Change password" : "Remove protection"}</h3><p>This password is never sent to the server and cannot be recovered.</p></div><button type="button" className="vault-icon-button" onClick={onClose}><FiX /></button></header>{needsCurrent ? <label>Current password<input type="password" value={current} onChange={(event) => setCurrent(event.target.value)} /></label> : null}{needsNew ? <><label>New password<input type="password" value={next} onChange={(event) => setNext(event.target.value)} /></label><label>Confirm password<input type="password" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></label></> : null}<footer><button type="button" className="vault-secondary-button" onClick={onClose}>Cancel</button><button disabled={working || (needsCurrent && !current) || (needsNew && (!next || next !== confirmation))} className="vault-primary-button">Continue</button></footer></form></div>;
+}
+
+function LocalAINoteDialog({ note, onClose, onChange }: { note: LegacyNoteDraft; onClose: () => void; onChange: (changes: Partial<Pick<LegacyNoteDraft, "title" | "content">>) => void }) {
+  const [capabilities, setCapabilities] = useState<LocalAICapabilities | null>(null);
+  const [result, setResult] = useState("");
+  const [action, setAction] = useState<"summary" | "title" | "tasks" | null>(null);
+  const [working, setWorking] = useState(true);
+  useEffect(() => { void getLocalAICapabilities().then(setCapabilities).finally(() => setWorking(false)); }, []);
+  const run = async (next: "summary" | "title" | "tasks") => {
+    setWorking(true); setAction(next); setResult("");
+    try {
+      setResult(next === "summary" ? await summarizeText(note.content) : next === "title" ? await suggestTitle(note.content) : await extractTasks(note.content));
+    } catch { toast.error("This Local AI action is unavailable in this browser."); }
+    finally { setWorking(false); }
+  };
+  const available = capabilities && Object.values(capabilities).some((value) => value !== "unavailable");
+  return <div className="vault-dialog-backdrop"><section className="vault-dialog vault-ai-dialog"><header><div><h3 className="flex items-center gap-2"><FiCpu /> Local AI</h3><p>Actions run locally in your browser when supported.</p></div><button type="button" className="vault-icon-button" onClick={onClose}><FiX /></button></header><div className="vault-ai-actions"><button disabled={working || !available} onClick={() => void run("summary")}>Summarize note</button><button disabled={working || !available} onClick={() => void run("title")}>Suggest title</button><button disabled={working || !available} onClick={() => void run("tasks")}>Extract tasks</button></div>{!working && !available ? <p className="mt-4 text-sm text-slate-400">Local AI is unavailable in this browser or device.</p> : null}{result ? <div className="vault-ai-result"><pre>{result}</pre><button className="vault-primary-button" onClick={() => { if (action === "title") onChange({ title: result }); else onChange({ content: `${note.content}\n\n${result}` }); onClose(); }}>{action === "title" ? "Use title" : "Insert into note"}</button></div> : null}</section></div>;
+}
+
+function formatRelativeDate(value: string) {
+  const difference = Date.now() - Date.parse(value);
+  if (!Number.isFinite(difference) || difference < 0) return "now";
+  const minutes = Math.floor(difference / 60_000);
+  if (minutes < 60) return `${Math.max(1, minutes)}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
+function formatDateTime(value: string) {
+  if (!value) return "Not saved yet";
+  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+}
+
+function formatHumanDate(value: string) {
+  if (!value) return "not saved yet";
+  const date = new Date(value);
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const days = Math.round((startOfToday.getTime() - startOfDate.getTime()) / 86_400_000);
+  const time = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(date);
+  if (days === 0) return `today at ${time}`;
+  if (days === 1) return `yesterday at ${time}`;
+  if (days > 1 && days < 7) {
+    return `${new Intl.DateTimeFormat(undefined, { weekday: "long" }).format(date)} at ${time}`;
+  }
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    ...(date.getFullYear() !== now.getFullYear() ? { year: "numeric" } : {}),
+  }).format(date);
 }
 
 function FolderDialog({ mode, folder, defaultParentFolderId, folders, onClose, onSubmit }: {
@@ -302,17 +883,17 @@ function FolderDialog({ mode, folder, defaultParentFolderId, folders, onClose, o
 }) {
   const [name, setName] = useState(folder?.name ?? "");
   const [parentFolderId, setParentFolderId] = useState(folder?.parentFolderId ?? defaultParentFolderId ?? null);
-  return <div className="fixed inset-0 z-[3200] grid place-items-center bg-black/60 p-4">
-    <form onSubmit={(event) => { event.preventDefault(); void onSubmit(name, parentFolderId); }} className="w-full max-w-md rounded-xl bg-white p-5 shadow-2xl dark:bg-zinc-900">
+  return <div className="vault-dialog-backdrop">
+    <form onSubmit={(event) => { event.preventDefault(); void onSubmit(name, parentFolderId); }} className="vault-dialog">
       <h3 className="font-semibold">{mode === "create" ? "Create folder" : "Rename or move folder"}</h3>
       <Field label="Folder name" value={name} onChange={setName} />
       <label className="mt-4 block text-xs font-medium text-zinc-500">Parent folder
-        <select value={parentFolderId ?? ""} onChange={(event) => setParentFolderId(event.target.value || null)} className="mt-1 w-full rounded-md border border-zinc-300 bg-transparent px-3 py-2 text-sm dark:border-zinc-700">
+        <select value={parentFolderId ?? ""} onChange={(event) => setParentFolderId(event.target.value || null)}>
           <option value="">No parent</option>
           {folders.filter((candidate) => candidate.id !== folder?.id).map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}
         </select>
       </label>
-      <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={onClose} className="rounded-lg border border-zinc-300 px-4 py-2 text-sm dark:border-zinc-700">Cancel</button><button disabled={!name.trim()} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Save folder</button></div>
+      <footer><button type="button" onClick={onClose} className="vault-secondary-button">Cancel</button><button disabled={!name.trim()} className="vault-primary-button disabled:opacity-50">Save folder</button></footer>
     </form>
   </div>;
 }
@@ -339,8 +920,8 @@ function ItemBreadcrumbs({ folders, activeTag }: { folders: Folder[]; activeTag:
 
 function FolderDeleteDialog({ folder, onClose, onDelete }: { folder: Folder; onClose: () => void; onDelete: (strategy: FolderDeleteStrategy) => Promise<void> }) {
   const [strategy, setStrategy] = useState<FolderDeleteStrategy>("move-to-parent");
-  return <div className="fixed inset-0 z-[3200] grid place-items-center bg-black/60 p-4">
-    <section className="w-full max-w-md rounded-xl bg-white p-5 shadow-2xl dark:bg-zinc-900">
+  return <div className="vault-dialog-backdrop">
+    <section className="vault-dialog">
       <h3 className="font-semibold">Delete “{folder.name}” safely</h3>
       <p className="mt-1 text-xs text-zinc-500">Items are never permanently deleted by this action.</p>
       <div className="mt-4 space-y-2 text-sm">
@@ -350,16 +931,17 @@ function FolderDeleteDialog({ folder, onClose, onDelete }: { folder: Folder; onC
           ["archive-items", "Delete folder and archive its items"],
         ] as const).map(([value, label]) => <label key={value} className="flex items-start gap-2"><input type="radio" checked={strategy === value} onChange={() => setStrategy(value)} />{label}</label>)}
       </div>
-      <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={onClose} className="rounded-lg border border-zinc-300 px-4 py-2 text-sm dark:border-zinc-700">Cancel</button><button type="button" onClick={() => void onDelete(strategy)} className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white">Delete folder</button></div>
+      <footer><button type="button" onClick={onClose} className="vault-secondary-button">Cancel</button><button type="button" onClick={() => void onDelete(strategy)} className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white">Delete folder</button></footer>
     </section>
   </div>;
 }
 
-function VaultItemForm({ draft, setDraft, folders, working, onSave, onDelete }: {
+function VaultItemForm({ draft, setDraft, folders, working, creating, onSave, onDelete }: {
   draft: VaultItem;
   setDraft: (draft: VaultItem) => void;
   folders: Folder[];
   working: boolean;
+  creating: boolean;
   onSave: () => void;
   onDelete?: () => void;
 }) {
@@ -413,7 +995,22 @@ function VaultItemForm({ draft, setDraft, folders, working, onSave, onDelete }: 
     });
   };
 
-  return <div className="mt-5 space-y-4">
+  return <>
+    {draft.type === "password" ? <MobilePasswordForm
+      draft={draft}
+      setDraft={setDraft}
+      working={working}
+      creating={creating}
+      revealed={Boolean(revealed.password)}
+      onToggleReveal={() => confirmReveal("password")}
+      generator={generator}
+      generatedPassword={generatedPassword}
+      onGeneratorChange={setGenerator}
+      onGenerate={generatePassword}
+      onUseGenerated={useGeneratedPassword}
+      onSave={onSave}
+    /> : null}
+    <div className={`vault-generic-item-form mt-5 space-y-4 ${draft.type === "password" ? "is-password" : ""}`}>
     <Field label="Title" value={draft.title} onChange={(title) => setDraft({ ...draft, title })} />
     <TagInput tags={draft.tags} onChange={(tags) => setDraft({ ...draft, tags })} />
     <label className="block text-xs font-medium text-zinc-500">Folder
@@ -478,7 +1075,109 @@ function VaultItemForm({ draft, setDraft, folders, working, onSave, onDelete }: 
         }}
       />
     ) : null}
+    </div>
+  </>;
+}
+
+function MobilePasswordForm({ draft, setDraft, working, creating, revealed, onToggleReveal, generator, generatedPassword, onGeneratorChange, onGenerate, onUseGenerated, onSave }: {
+  draft: VaultItem;
+  setDraft: (draft: VaultItem) => void;
+  working: boolean;
+  creating: boolean;
+  revealed: boolean;
+  onToggleReveal: () => void;
+  generator: PasswordGeneratorOptions;
+  generatedPassword: string;
+  onGeneratorChange: (options: PasswordGeneratorOptions) => void;
+  onGenerate: () => void;
+  onUseGenerated: () => void;
+  onSave: () => void;
+}) {
+  const payload = draft.payload as Record<string, unknown>;
+  const value = (field: string) => String(payload[field] ?? "");
+  const setPayload = (field: string, next: string) => setDraft({
+    ...draft,
+    payload: { ...draft.payload, [field]: next } as VaultItem["payload"],
+  });
+  const password = value("password");
+  const strength = passwordStrength(password);
+  const generated = generatedPassword || password;
+  const copy = (next: string) => void copySensitiveValue(next).then(() => toast.success("Copied; clipboard will clear in 30 seconds"));
+
+  return <div className="vault-mobile-password-form">
+    <header className="vault-mobile-password-top">
+      <span>{creating ? "Nuevo ítem" : "Editar contraseña"}</span>
+      <button type="button" disabled={working || !draft.title.trim()} onClick={onSave}>Guardar</button>
+    </header>
+    <div className="vault-mobile-password-intro">
+      <span className="vault-mobile-password-icon"><FiLock /></span>
+      <div><h2>Contraseña</h2><p>Guarda un inicio de sesión</p></div>
+    </div>
+
+    <MobileSection title="Información básica">
+      <MobilePasswordField label="Título" required value={draft.title} onChange={(title) => setDraft({ ...draft, title })} />
+      <MobilePasswordField label="URL" value={value("url")} onChange={(next) => setPayload("url", next)} action={<FiGlobe />} />
+      <MobilePasswordField label="Usuario" value={value("username")} onChange={(next) => setPayload("username", next)} action={<button type="button" onClick={() => copy(value("username"))}><FiCopy /></button>} />
+      <MobilePasswordField label="Contraseña" required secret={!revealed} value={password} onChange={(next) => setPayload("password", next)} action={<><button type="button" onClick={onToggleReveal}>{revealed ? <FiEyeOff /> : <FiEye />}</button><button type="button" onClick={() => copy(password)}><FiCopy /></button></>} />
+      <div className="vault-password-strength"><span style={{ width: `${strength.score}%` }} /><i>{strength.label}</i></div>
+    </MobileSection>
+
+    <MobileSection title="Generador">
+      <div className="vault-mobile-generator-value"><span><small>Generar contraseña</small><strong>{generated || "Pulsa actualizar para generar"}</strong></span><button type="button" onClick={onGenerate}><FiRefreshCw /></button></div>
+      {generatedPassword && generatedPassword !== password ? <button type="button" className="vault-mobile-use-password" onClick={onUseGenerated}>Usar contraseña generada</button> : null}
+      <label className="vault-mobile-length"><span>Longitud <b>{generator.length}</b></span><input type="range" min="8" max="64" value={generator.length} onChange={(event) => onGeneratorChange({ ...generator, length: Number(event.target.value) })} /></label>
+      <div className="vault-mobile-options">
+        {([
+          ["uppercase", "Mayúsculas (A-Z)"],
+          ["lowercase", "Minúsculas (a-z)"],
+          ["numbers", "Números (0-9)"],
+          ["symbols", "Símbolos (!@#$%^&*)"],
+          ["excludeAmbiguous", "Excluir caracteres ambiguos (Il1oO0)"],
+        ] as const).map(([option, label]) => <label key={option}><input type="checkbox" checked={generator[option]} onChange={(event) => onGeneratorChange({ ...generator, [option]: event.target.checked })} />{label}</label>)}
+      </div>
+    </MobileSection>
+
+    <MobileSection title="Opcional">
+      <MobilePasswordField label="Notas" multiline value={value("notes")} onChange={(next) => setPayload("notes", next)} placeholder="Notas adicionales..." />
+    </MobileSection>
+
+    <MobileSection title="TOTP (2FA)">
+      <MobilePasswordField label="Clave secreta (opcional)" value={value("totpSecret")} onChange={(next) => setPayload("totpSecret", next)} action={<button type="button" onClick={() => copy(value("totpSecret"))}><FiCopy /></button>} />
+      <p className="vault-mobile-help">Esta clave se usará para generar códigos TOTP.</p>
+    </MobileSection>
+
+    <section className="vault-mobile-tags-section">
+      <h3>Etiquetas</h3>
+      <TagInput tags={draft.tags} onChange={(tags) => setDraft({ ...draft, tags })} />
+    </section>
   </div>;
+}
+
+function MobileSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return <section className="vault-mobile-password-section"><h3>{title}</h3><div>{children}</div></section>;
+}
+
+function MobilePasswordField({ label, value, onChange, action, required, secret, multiline, placeholder }: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  action?: React.ReactNode;
+  required?: boolean;
+  secret?: boolean;
+  multiline?: boolean;
+  placeholder?: string;
+}) {
+  return <label className="vault-mobile-password-field"><span>{label}{required ? <b> *</b> : null}</span><i>{multiline
+    ? <textarea value={value} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} rows={5} />
+    : <input type={secret ? "password" : "text"} value={value} placeholder={placeholder} autoComplete="off" onChange={(event) => onChange(event.target.value)} />}
+    {action ? <em>{action}</em> : null}</i></label>;
+}
+
+function passwordStrength(password: string) {
+  if (!password) return { score: 0, label: "Agrega una contraseña" };
+  const groups = [/[a-z]/, /[A-Z]/, /\d/, /[^A-Za-z0-9]/].filter((pattern) => pattern.test(password)).length;
+  const score = Math.min(100, Math.round((Math.min(password.length, 20) / 20) * 55 + (groups / 4) * 45));
+  return { score, label: score >= 75 ? "Fuerte" : score >= 45 ? "Media" : "Débil" };
 }
 
 interface PasswordGeneratorOptions {

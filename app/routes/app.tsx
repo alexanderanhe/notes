@@ -1,10 +1,11 @@
-import { NotesDesktop } from "~/components/notes-desktop";
+import { VaultItemsPanel } from "~/components/vault-items-panel";
 import { CryptoProvider } from "~/contexts/crypto-provider";
 import { VaultProvider } from "~/contexts/vault-provider";
 import { WorkspaceProvider } from "~/contexts/workspace-context";
 import { FolderProvider } from "~/contexts/folder-context";
 import { requireUser } from "~/lib/auth/session.server";
 import { getBackgroundPreference, getThemePreference } from "~/lib/auth/users.server";
+import { useThemePreference } from "~/lib/theme";
 
 import type { Route } from "./+types/app";
 
@@ -39,11 +40,12 @@ export default function PrivateApp({ loaderData }: Route.ComponentProps) {
 function AppScreen({
   email,
   theme,
-  backgroundUrl,
+  backgroundUrl: _backgroundUrl,
 }: {
   email: string;
   theme: "light" | "dark" | "system";
   backgroundUrl: string | null;
 }) {
-  return <NotesDesktop email={email} initialTheme={theme} initialBackgroundUrl={backgroundUrl} />;
+  useThemePreference(theme);
+  return <VaultItemsPanel email={email} />;
 }
