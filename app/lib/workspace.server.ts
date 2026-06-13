@@ -9,6 +9,10 @@ interface WorkspaceDocument {
   activeNoteId: ObjectId | null;
   openItemIds?: ObjectId[];
   activeItemId?: ObjectId | null;
+  activeFolderId?: ObjectId | null;
+  activeTypeFilter?: string | null;
+  activeTagFilter?: null;
+  sidebarExpandedFolders?: ObjectId[];
   sidebarWidth: number;
   sidebarCollapsed: boolean;
   noteUiState: Record<
@@ -47,12 +51,36 @@ async function ownedItemIds(userId: ObjectId, itemIds: string[]) {
   return new Set([...notes, ...vaultItems].map((item) => item._id.toHexString()));
 }
 
+async function ownedFolderIds(userId: ObjectId, folderIds: string[]) {
+  const validIds = folderIds.filter(ObjectId.isValid).map((id) => new ObjectId(id));
+  if (!validIds.length) return new Set<string>();
+  const folders = await (await getDb()).collection<{ userId: ObjectId }>("folders")
+    .find({ userId, _id: { $in: validIds } }, { projection: { _id: 1 } }).toArray();
+  return new Set(folders.map((folder) => folder._id.toHexString()));
+}
+
+async function normalizeOwnedOrganization(userId: ObjectId, workspace: WorkspaceState) {
+  const owned = await ownedFolderIds(userId, [
+    ...(workspace.activeFolderId ? [workspace.activeFolderId] : []),
+    ...workspace.sidebarExpandedFolders,
+  ]);
+  return {
+    ...workspace,
+    activeFolderId: workspace.activeFolderId && owned.has(workspace.activeFolderId) ? workspace.activeFolderId : null,
+    sidebarExpandedFolders: workspace.sidebarExpandedFolders.filter((id) => owned.has(id)),
+  };
+}
+
 function serializeWorkspace(document: WithId<WorkspaceDocument>): WorkspaceState {
   return {
     openNoteIds: document.openNoteIds.map((id) => id.toHexString()),
     activeNoteId: document.activeNoteId?.toHexString() ?? null,
     openItemIds: (document.openItemIds ?? document.openNoteIds).map((id) => id.toHexString()),
     activeItemId: (document.activeItemId ?? document.activeNoteId)?.toHexString() ?? null,
+    activeFolderId: document.activeFolderId?.toHexString() ?? null,
+    activeTypeFilter: document.activeTypeFilter ?? null,
+    activeTagFilter: null,
+    sidebarExpandedFolders: (document.sidebarExpandedFolders ?? []).map((id) => id.toHexString()),
     sidebarWidth: document.sidebarWidth,
     sidebarCollapsed: document.sidebarCollapsed,
     noteUiState: document.noteUiState,
@@ -66,10 +94,10 @@ export async function getWorkspace(userId: ObjectId) {
   if (!document) return normalizeWorkspace(null, new Set());
 
   const serialized = serializeWorkspace(document);
-  const normalized = normalizeWorkspace(
+  const normalized = await normalizeOwnedOrganization(userId, normalizeWorkspace(
     serialized,
     await ownedItemIds(userId, [...serialized.openNoteIds, ...serialized.openItemIds]),
-  );
+  ));
   if (
     normalized.openNoteIds.length !== serialized.openNoteIds.length ||
     normalized.activeNoteId !== serialized.activeNoteId
@@ -85,10 +113,10 @@ export async function saveWorkspace(
   userId: ObjectId,
   input: Partial<WorkspaceState>,
 ) {
-  const normalized = normalizeWorkspace(
+  const normalized = await normalizeOwnedOrganization(userId, normalizeWorkspace(
     input,
     await ownedItemIds(userId, [...(input.openNoteIds ?? []), ...(input.openItemIds ?? [])]),
-  );
+  ));
   const now = new Date();
   const document = await (await workspacesCollection()).findOneAndUpdate(
     { userId },
@@ -100,6 +128,10 @@ export async function saveWorkspace(
           : null,
         openItemIds: normalized.openItemIds.map((id) => new ObjectId(id)),
         activeItemId: normalized.activeItemId ? new ObjectId(normalized.activeItemId) : null,
+        activeFolderId: normalized.activeFolderId && ObjectId.isValid(normalized.activeFolderId) ? new ObjectId(normalized.activeFolderId) : null,
+        activeTypeFilter: normalized.activeTypeFilter,
+        activeTagFilter: null,
+        sidebarExpandedFolders: normalized.sidebarExpandedFolders.filter(ObjectId.isValid).map((id) => new ObjectId(id)),
         sidebarWidth: normalized.sidebarWidth,
         sidebarCollapsed: normalized.sidebarCollapsed,
         noteUiState: normalized.noteUiState,

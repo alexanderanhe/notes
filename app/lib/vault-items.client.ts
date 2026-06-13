@@ -1,4 +1,5 @@
 import { decryptString, encryptString, generateRandomBytes } from "~/lib/crypto.client";
+import { normalizeTags } from "~/lib/folders";
 import {
   VAULT_ITEM_ENCRYPTION_VERSION,
   type EncryptedVaultItem,
@@ -18,6 +19,7 @@ export async function encryptVaultItemPayload<T extends VaultItemType>(
     favorite?: boolean;
     archived?: boolean;
     pinned?: boolean;
+    folderId?: string | null;
   },
 ): Promise<EncryptedVaultItemInput> {
   const tags = options.tags ?? [];
@@ -29,6 +31,7 @@ export async function encryptVaultItemPayload<T extends VaultItemType>(
   ]);
   return {
     type,
+    folderId: options.folderId ?? null,
     encryptedTitle: title.ciphertext,
     titleIv: title.iv,
     encryptedPayload: encryptedPayload.ciphertext,
@@ -56,6 +59,7 @@ export async function decryptVaultItemPayload<T extends VaultItemType>(
   return {
     id: item.id,
     type: item.type,
+    folderId: item.folderId,
     title,
     payload: JSON.parse(payload) as VaultItemPayloadMap[T],
     tags: JSON.parse(tags) as string[],
@@ -93,6 +97,54 @@ export async function updateVaultItem<T extends VaultItemType>(
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
+  });
+}
+
+export async function moveItemToFolder(itemId: string, folderId: string | null) {
+  return requestJson<{ item: EncryptedVaultItem }>(`/api/vault-items/${itemId}/folder`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ folderId }),
+  });
+}
+
+export async function updateVaultItemTags(
+  item: VaultItem,
+  tags: string[],
+  masterKey: CryptoKey,
+) {
+  tags = normalizeTags(tags);
+  const [encryptedTags, searchText] = await Promise.all([
+    encryptString(JSON.stringify(tags), masterKey),
+    encryptString(buildSearchText(item.title, tags, item.payload), masterKey),
+  ]);
+  return requestJson<{ item: EncryptedVaultItem }>(`/api/vault-items/${item.id}/tags`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      tagsEncrypted: encryptedTags.ciphertext,
+      tagsIv: encryptedTags.iv,
+      encryptedSearchText: searchText.ciphertext,
+      searchTextIv: searchText.iv,
+    }),
+  });
+}
+
+export const addTagToItem = (item: VaultItem, tag: string, masterKey: CryptoKey) =>
+  updateVaultItemTags(item, [...item.tags, tag], masterKey);
+
+export const removeTagFromItem = (item: VaultItem, tag: string, masterKey: CryptoKey) =>
+  updateVaultItemTags(item, item.tags.filter((value) => value !== tag), masterKey);
+
+export async function toggleFavorite(itemId: string, favorite: boolean) {
+  return requestJson<{ item: EncryptedVaultItem }>(`/api/vault-items/${itemId}/favorite`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ favorite }),
+  });
+}
+
+export async function archiveItem(itemId: string, archived: boolean) {
+  return requestJson<{ item: EncryptedVaultItem }>(`/api/vault-items/${itemId}/archive`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ archived }),
   });
 }
 

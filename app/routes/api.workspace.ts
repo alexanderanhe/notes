@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireUser } from "~/lib/auth/session.server";
 import { assertSameOrigin, enforceRateLimit } from "~/lib/security.server";
 import { getWorkspace, saveWorkspace } from "~/lib/workspace.server";
+import { VAULT_ITEM_TYPES } from "~/lib/vault-items";
 
 import type { Route } from "./+types/api.workspace";
 
@@ -12,6 +13,10 @@ const workspaceSchema = z
     activeNoteId: z.string().nullable(),
     openItemIds: z.array(z.string()).max(10).optional(),
     activeItemId: z.string().nullable().optional(),
+    activeFolderId: z.string().nullable().optional(),
+    activeTypeFilter: z.enum(["all", ...VAULT_ITEM_TYPES]).nullable().optional(),
+    activeTagFilter: z.null().optional(),
+    sidebarExpandedFolders: z.array(z.string()).max(100).optional(),
     sidebarWidth: z.number(),
     sidebarCollapsed: z.boolean(),
     noteUiState: z.record(

@@ -25,6 +25,7 @@ describe("vault item client encryption", () => {
     expect(JSON.stringify(encrypted)).not.toContain("private-user");
     expect(JSON.stringify(encrypted)).not.toContain("private-password");
     expect(JSON.stringify(encrypted)).not.toContain("Private login");
+    expect(encrypted.folderId).toBeNull();
 
     await expect(decryptVaultItemPayload({
       ...encrypted,
@@ -64,4 +65,3 @@ describe("vault item client encryption", () => {
     expect([...password].every((value, index) => index === 0 || value !== password[index - 1])).toBe(true);
   });
 });
-

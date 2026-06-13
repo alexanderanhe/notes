@@ -32,6 +32,7 @@ export interface User {
   };
   appearancePreferences?: {
     theme: "light" | "dark" | "system";
+    backgroundUrl?: string | null;
   };
   createdAt: Date;
   updatedAt: Date;
@@ -275,6 +276,26 @@ export async function setThemePreference(
     {
       $set: {
         "appearancePreferences.theme": theme,
+        updatedAt: new Date(),
+      },
+    },
+  );
+  return result.matchedCount === 1;
+}
+
+export function getBackgroundPreference(user: User) {
+  return user.appearancePreferences?.backgroundUrl ?? null;
+}
+
+export async function setBackgroundPreference(
+  userId: ObjectId,
+  backgroundUrl: string | null,
+) {
+  const result = await (await usersCollection()).updateOne(
+    { _id: userId },
+    {
+      $set: {
+        "appearancePreferences.backgroundUrl": backgroundUrl,
         updatedAt: new Date(),
       },
     },

@@ -11,6 +11,7 @@ import {
 
 interface NoteDocument extends EncryptedNoteInput {
   userId: ObjectId;
+  folderId?: string | null;
   isCritical?: boolean;
   criticalEnabledAt?: Date;
   createdAt: Date;
@@ -95,6 +96,7 @@ export function parseEncryptedNoteInput(value: unknown): EncryptedNoteInput {
 function serializeSummary(note: WithId<NoteDocument>): EncryptedNoteSummary {
   return {
     id: note._id.toHexString(),
+    folderId: note.folderId ?? null,
     encryptedTitle: note.encryptedTitle,
     titleIv: note.titleIv,
     encryptionVersion: note.encryptionVersion,
@@ -258,4 +260,26 @@ export async function hasCriticalNotes(userId: ObjectId) {
     { userId, isCritical: true },
     { limit: 1 },
   ).then((count) => count > 0);
+}
+
+export async function setNoteFolder(
+  userId: ObjectId,
+  noteId: string,
+  folderId: string | null,
+) {
+  if (!ObjectId.isValid(noteId)) return null;
+  if (folderId !== null) {
+    if (!ObjectId.isValid(folderId)) throw new Response("Invalid folder.", { status: 400 });
+    const folder = await (await getDb()).collection<{ userId: ObjectId }>("folders").findOne({
+      _id: new ObjectId(folderId),
+      userId,
+    });
+    if (!folder) throw new Response("Folder not found.", { status: 404 });
+  }
+  const note = await (await notesCollection()).findOneAndUpdate(
+    { _id: new ObjectId(noteId), userId },
+    { $set: { folderId, updatedAt: new Date() } },
+    { returnDocument: "after" },
+  );
+  return note ? serializeSummary(note) : null;
 }

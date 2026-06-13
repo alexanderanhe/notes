@@ -15,6 +15,10 @@ export interface WorkspaceState {
   activeNoteId: string | null;
   openItemIds: string[];
   activeItemId: string | null;
+  activeFolderId: string | null;
+  activeTypeFilter: string | null;
+  activeTagFilter: null;
+  sidebarExpandedFolders: string[];
   sidebarWidth: number;
   sidebarCollapsed: boolean;
   noteUiState: Record<string, WorkspaceNoteUiState>;
@@ -26,6 +30,10 @@ export const emptyWorkspace: WorkspaceState = {
   activeNoteId: null,
   openItemIds: [],
   activeItemId: null,
+  activeFolderId: null,
+  activeTypeFilter: null,
+  activeTagFilter: null,
+  sidebarExpandedFolders: [],
   sidebarWidth: DEFAULT_SIDEBAR_WIDTH,
   sidebarCollapsed: false,
   noteUiState: {},
@@ -72,6 +80,10 @@ export function normalizeWorkspace(
     activeNoteId,
     openItemIds,
     activeItemId,
+    activeFolderId: typeof input?.activeFolderId === "string" ? input.activeFolderId : null,
+    activeTypeFilter: typeof input?.activeTypeFilter === "string" ? input.activeTypeFilter : null,
+    activeTagFilter: null,
+    sidebarExpandedFolders: Array.from(new Set((input?.sidebarExpandedFolders ?? []).filter((id) => typeof id === "string"))).slice(0, 100),
     sidebarWidth: clampNumber(
       input?.sidebarWidth,
       MIN_SIDEBAR_WIDTH,

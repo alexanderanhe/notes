@@ -3,6 +3,7 @@ export const LEGACY_NOTE_ENCRYPTION_VERSION = 1;
 
 export interface EncryptedNoteSummary {
   id: string;
+  folderId: string | null;
   encryptedTitle: string;
   titleIv: string;
   encryptionVersion: number;

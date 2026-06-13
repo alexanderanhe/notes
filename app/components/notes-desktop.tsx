@@ -29,9 +29,7 @@ import {
   FiMenu,
   FiMinimize2,
   FiMinus,
-  FiMonitor,
   FiMoreHorizontal,
-  FiMoon,
   FiPlus,
   FiSearch,
   FiSidebar,
@@ -49,6 +47,7 @@ import { toast } from "sonner";
 import { LogoutButton } from "~/components/logout-button";
 import { useVault } from "~/contexts/vault-context";
 import { useWorkspace } from "~/contexts/workspace-context";
+import { useFolders } from "~/contexts/folder-context";
 import {
   detectLanguage,
   extractTasks,
@@ -79,6 +78,7 @@ import {
   MIN_SIDEBAR_WIDTH,
   type WorkspaceEditorMode,
 } from "~/lib/workspace";
+import type { Folder } from "~/lib/folders";
 
 type NoteFilter = "all" | "favorites" | "archived";
 type WindowMode = "preview" | "edit";
@@ -133,24 +133,31 @@ function sortNotes(notes: EncryptedNoteSummary[]) {
 export function NotesDesktop({
   email,
   initialTheme,
+  initialBackgroundUrl,
 }: {
   email: string;
   initialTheme: ThemePreference;
+  initialBackgroundUrl: string | null;
 }) {
   const { loading, masterKey, unlocked } = useVault();
   const workspace = useWorkspace();
+  const folderState = useFolders();
   const [notes, setNotes] = useState<EncryptedNoteSummary[]>([]);
   const [notesLoaded, setNotesLoaded] = useState(false);
   const [titles, setTitles] = useState<Record<string, string>>({});
   const [windows, setWindows] = useState<NoteWindow[]>([]);
   const [filter, setFilter] = useState<NoteFilter>("all");
+  const [folderFilter, setFolderFilter] = useState<string | null | "uncategorized">(null);
+  const [creatingFolder, setCreatingFolder] = useState(false);
+  const [folderName, setFolderName] = useState("");
   const [query, setQuery] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [error, setError] = useState("");
   const [passwordAction, setPasswordAction] = useState<PasswordAction | null>(null);
   const [working, setWorking] = useState(false);
   const [vaultItemsOpen, setVaultItemsOpen] = useState(false);
-  const [theme, setTheme] = useState<ThemePreference>(initialTheme);
+  const theme = initialTheme;
+  const backgroundUrl = initialBackgroundUrl;
   const [searchParams, setSearchParams] = useSearchParams();
   const resumedAction = useRef(false);
   const windowsRef = useRef<NoteWindow[]>([]);
@@ -227,21 +234,6 @@ export function NotesDesktop({
     if (action === "open-critical") void openNote(noteId);
     else void setCritical(noteId, value);
   }, [searchParams, setSearchParams]);
-
-  async function changeTheme(nextTheme: ThemePreference) {
-    const previous = theme;
-    setTheme(nextTheme);
-    try {
-      await requestJson("/api/preferences/theme", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ theme: nextTheme }),
-      });
-    } catch {
-      setTheme(previous);
-      setError("The theme could not be saved.");
-    }
-  }
 
   const saveWindow = useCallback(
     async (key: number) => {
@@ -448,6 +440,40 @@ export function NotesDesktop({
     }
   }
 
+  async function moveNoteToFolder(noteId: string, folderId: string | null) {
+    try {
+      const { note } = await requestJson<{ note: EncryptedNoteSummary }>(
+        `/api/notes/${noteId}/folder`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ folderId }),
+        },
+      );
+      setNotes((current) => sortNotes(current.map((item) => item.id === note.id ? { ...item, ...note } : item)));
+      updateWindows((current) => current.map((noteWindow) =>
+        noteWindow.encrypted?.id === note.id
+          ? { ...noteWindow, encrypted: { ...noteWindow.encrypted, ...note } }
+          : noteWindow,
+      ));
+      toast.success(folderId ? "Note moved to folder" : "Note moved to Uncategorized");
+    } catch {
+      toast.error("The note could not be moved.");
+    }
+  }
+
+  async function createNotesFolder() {
+    if (!folderName.trim()) return;
+    try {
+      await folderState.createFolder(folderName, typeof folderFilter === "string" && folderFilter !== "uncategorized" ? folderFilter : null);
+      setFolderName("");
+      setCreatingFolder(false);
+      toast.success("Folder created");
+    } catch {
+      toast.error("The folder could not be created.");
+    }
+  }
+
   function createNote() {
     addWindow(null, { title: "", content: "" }, null, "edit");
     setSidebarOpen(false);
@@ -615,6 +641,8 @@ export function NotesDesktop({
 
   const vaultReady = !loading && unlocked && Boolean(masterKey);
   const filteredNotes = notes.filter((note) => {
+    if (folderFilter === "uncategorized" && note.folderId !== null) return false;
+    if (folderFilter && folderFilter !== "uncategorized" && note.folderId !== folderFilter) return false;
     if (filter === "favorites" && !note.pinned) return false;
     if (filter === "archived" && !note.archived) return false;
     if (filter !== "archived" && note.archived) return false;
@@ -660,10 +688,26 @@ export function NotesDesktop({
             </label>
           </div>
           <nav className="mt-4 space-y-1 px-2">
-            <SidebarButton active={filter === "all"} icon={<FiFolder />} label="All" count={notes.filter((note) => !note.archived).length} onClick={() => setFilter("all")} />
+            <SidebarButton active={filter === "all" && folderFilter === null} icon={<FiFolder />} label="All" count={notes.filter((note) => !note.archived).length} onClick={() => { setFilter("all"); setFolderFilter(null); }} />
             <SidebarButton active={filter === "favorites"} icon={<FiStar />} label="Favorites" count={notes.filter((note) => note.pinned && !note.archived).length} onClick={() => setFilter("favorites")} />
             <SidebarButton active={filter === "archived"} icon={<FiArchive />} label="Archived" count={notes.filter((note) => note.archived).length} onClick={() => setFilter("archived")} />
           </nav>
+          <div className="mt-4 px-2">
+            <div className="flex items-center justify-between px-2">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Folders</p>
+              <button type="button" onClick={() => setCreatingFolder((current) => !current)} aria-label="Create notes folder" className="rounded p-1 hover:bg-zinc-200 dark:hover:bg-zinc-800"><FiPlus /></button>
+            </div>
+            {creatingFolder ? (
+              <div className="mt-1 flex gap-1">
+                <input value={folderName} maxLength={80} onChange={(event) => setFolderName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void createNotesFolder(); }} placeholder="Folder name" className="min-w-0 flex-1 rounded-md border border-zinc-300 bg-transparent px-2 py-1 text-xs dark:border-zinc-700" />
+                <button type="button" onClick={() => void createNotesFolder()} className="rounded-md bg-blue-600 px-2 text-xs text-white">Add</button>
+              </div>
+            ) : null}
+            <div className="mt-1 max-h-28 overflow-y-auto">
+              <SidebarButton active={folderFilter === "uncategorized"} icon={<FiFolder />} label="Uncategorized" count={notes.filter((note) => note.folderId === null).length} onClick={() => { setFilter("all"); setFolderFilter("uncategorized"); }} />
+              {folderState.folders.map((folder) => <SidebarButton key={folder.id} active={folderFilter === folder.id} icon={<FiFolder />} label={folder.name} count={notes.filter((note) => note.folderId === folder.id).length} onClick={() => { setFilter("all"); setFolderFilter(folder.id); }} />)}
+            </div>
+          </div>
           <div className="mt-4 min-h-0 flex-1 overflow-y-auto px-2">
             {filteredNotes.map((note) => (
               <button key={note.id} type="button" onClick={() => void openNote(note.id)} className="mb-0.5 block w-full rounded-md px-2.5 py-2 text-left hover:bg-zinc-200/70 dark:hover:bg-zinc-800">
@@ -675,14 +719,15 @@ export function NotesDesktop({
           <div className="shrink-0 border-t border-zinc-200 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] dark:border-zinc-800">
             <AccountMenu
               email={email}
-              theme={theme}
-              onTheme={(nextTheme) => void changeTheme(nextTheme)}
             />
           </div>
           <SidebarResizeHandle onPointerDown={beginSidebarResize} />
         </aside>
 
-        <section className="workspace-background relative min-w-0 flex-1 overflow-hidden">
+        <section
+          style={backgroundUrl ? { backgroundImage: `url("${backgroundUrl}")` } : undefined}
+          className="workspace-background relative min-w-0 flex-1 overflow-hidden"
+        >
           <button
             type="button"
             title={workspace.sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
@@ -731,6 +776,8 @@ export function NotesDesktop({
               onResize={(width, height) => updateWindow(noteWindow.key, (window) => ({ ...window, width, height }))}
               onProtection={(mode) => setPasswordAction({ mode, windowKey: noteWindow.key })}
               onCritical={(isCritical) => noteWindow.encrypted && void setCritical(noteWindow.encrypted.id, isCritical)}
+              folders={folderState.folders}
+              onFolder={(folderId) => noteWindow.encrypted && void moveNoteToFolder(noteWindow.encrypted.id, folderId)}
             />
           ))}
           <OpenNotesTabs
@@ -760,15 +807,10 @@ export function NotesDesktop({
 
 function AccountMenu({
   email,
-  theme,
-  onTheme,
 }: {
   email: string;
-  theme: ThemePreference;
-  onTheme: (theme: ThemePreference) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [customizeOpen, setCustomizeOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -784,45 +826,14 @@ function AccountMenu({
     <div ref={menuRef} className="relative">
       {open ? (
         <div className="absolute right-0 bottom-full left-0 mb-2 space-y-2 rounded-xl border border-zinc-200 bg-white p-2 shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
-          <button
-            type="button"
-            onClick={() => setCustomizeOpen((current) => !current)}
+          <Link
+            to="/settings/appearance"
+            onClick={() => setOpen(false)}
             className="flex w-full items-center justify-center gap-2 rounded-lg border border-zinc-300 px-4 py-2 text-sm font-semibold hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
           >
             <FiSun />
             Customize
-            {customizeOpen ? <FiChevronUp /> : <FiChevronDown />}
-          </button>
-          {customizeOpen ? (
-            <div className="grid grid-cols-3 gap-1 rounded-lg bg-zinc-100 p-1 dark:bg-zinc-800">
-              {(["light", "dark", "system"] as const).map((option) => (
-                <button
-                  key={option}
-                  type="button"
-                  title={themeLabel(option)}
-                  onClick={() => onTheme(option)}
-                  className={`flex flex-col items-center gap-1 rounded-md px-2 py-2 text-[11px] ${
-                    theme === option
-                      ? "bg-white font-semibold shadow-sm dark:bg-zinc-700"
-                      : "text-zinc-500 hover:text-zinc-950 dark:hover:text-white"
-                  }`}
-                >
-                  {option === "light" ? (
-                    <FiSun />
-                  ) : option === "dark" ? (
-                    <FiMoon />
-                  ) : (
-                    <FiMonitor />
-                  )}
-                  {option === "light"
-                    ? "Light"
-                    : option === "dark"
-                      ? "Dark"
-                      : "System"}
-                </button>
-              ))}
-            </div>
-          ) : null}
+          </Link>
           <Link
             to="/settings/security"
             onClick={() => setOpen(false)}
@@ -871,6 +882,8 @@ function NoteWindowView({
   onResize,
   onProtection,
   onCritical,
+  folders,
+  onFolder,
 }: {
   noteWindow: NoteWindow;
   working: boolean;
@@ -886,6 +899,8 @@ function NoteWindowView({
   onResize: (width: number, height: number) => void;
   onProtection: (mode: "protect" | "change" | "remove") => void;
   onCritical: (isCritical: boolean) => void;
+  folders: Folder[];
+  onFolder: (folderId: string | null) => void;
 }) {
   const workspace = useWorkspace();
   const [menu, setMenu] = useState(false);
@@ -1015,7 +1030,7 @@ function NoteWindowView({
             </button>
             <div className="relative">
               <button aria-label="More options" onClick={() => setMenu((current) => !current)} className="rounded-md border border-zinc-300 p-2 dark:border-zinc-700"><FiMoreHorizontal /></button>
-              {menu ? <NoteMenu noteWindow={noteWindow} working={working} onAI={openLocalAI} onChange={onChange} onDelete={onDelete} onProtection={onProtection} onCritical={onCritical} onClose={() => setMenu(false)} /> : null}
+              {menu ? <NoteMenu noteWindow={noteWindow} working={working} folders={folders} onFolder={onFolder} onAI={openLocalAI} onChange={onChange} onDelete={onDelete} onProtection={onProtection} onCritical={onCritical} onClose={() => setMenu(false)} /> : null}
             </div>
           </div>
           <div
@@ -1076,9 +1091,11 @@ function NoteWindowView({
   );
 }
 
-function NoteMenu({ noteWindow, working, onAI, onChange, onDelete, onProtection, onCritical, onClose }: {
+function NoteMenu({ noteWindow, working, folders, onFolder, onAI, onChange, onDelete, onProtection, onCritical, onClose }: {
   noteWindow: NoteWindow;
   working: boolean;
+  folders: Folder[];
+  onFolder: (folderId: string | null) => void;
   onAI: () => void;
   onChange: (values: Partial<Pick<NoteWindow, "pinned" | "archived">>) => void;
   onDelete: () => void;
@@ -1092,6 +1109,19 @@ function NoteMenu({ noteWindow, working, onAI, onChange, onDelete, onProtection,
       <MenuLabel>Note</MenuLabel>
       <MenuButton icon={<FiStar />} label={noteWindow.pinned ? "Unpin" : "Pin"} onClick={() => action(() => onChange({ pinned: !noteWindow.pinned }))} />
       <MenuButton icon={<FiArchive />} label={noteWindow.archived ? "Unarchive" : "Archive"} onClick={() => action(() => onChange({ archived: !noteWindow.archived }))} />
+      {noteWindow.encrypted ? (
+        <label className="block px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
+          Folder
+          <select
+            value={noteWindow.encrypted.folderId ?? ""}
+            onChange={(event) => action(() => onFolder(event.target.value || null))}
+            className="mt-1 w-full rounded-md border border-zinc-300 bg-transparent px-2 py-1.5 text-xs font-normal normal-case tracking-normal text-zinc-950 dark:border-zinc-700 dark:text-zinc-100"
+          >
+            <option value="">Uncategorized</option>
+            {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
+          </select>
+        </label>
+      ) : null}
       <MenuDivider />
       <MenuLabel>Intelligence</MenuLabel>
       <MenuButton icon={<FiCpu />} label="Local AI" onClick={() => action(onAI)} />
@@ -1520,14 +1550,6 @@ function DesktopLoading() {
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(new Date(value));
-}
-
-function themeLabel(theme: ThemePreference) {
-  return theme === "light"
-    ? "Light theme"
-    : theme === "dark"
-      ? "Dark theme"
-      : "Use system theme";
 }
 
 function workspaceModeToWindowMode(

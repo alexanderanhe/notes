@@ -41,6 +41,7 @@ export interface VaultItemPayloadMap {
 export interface VaultItem<T extends VaultItemType = VaultItemType> {
   id: string;
   type: T;
+  folderId: string | null;
   title: string;
   payload: VaultItemPayloadMap[T];
   tags: string[];
@@ -53,6 +54,7 @@ export interface VaultItem<T extends VaultItemType = VaultItemType> {
 
 export interface EncryptedVaultItemInput {
   type: VaultItemType;
+  folderId: string | null;
   encryptedTitle: string;
   titleIv: string;
   encryptedPayload: string;
@@ -90,4 +92,3 @@ export const VAULT_ITEM_LABELS: Record<VaultItemType, string> = {
   checklist: "Checklist",
   template: "Template",
 };
-

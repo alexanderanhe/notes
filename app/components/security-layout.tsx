@@ -5,14 +5,16 @@ export function SecurityLayout({
   title,
   description,
   children,
+  wide = false,
 }: {
   title: string;
   description: string;
   children: ReactNode;
+  wide?: boolean;
 }) {
   return (
     <main className="min-h-screen bg-zinc-50 px-4 py-10 dark:bg-zinc-950">
-      <section className="mx-auto max-w-2xl">
+      <section className={`mx-auto ${wide ? "max-w-5xl" : "max-w-2xl"}`}>
         <Link className="text-sm font-medium text-blue-600" to="/app">
           Back to notes
         </Link>

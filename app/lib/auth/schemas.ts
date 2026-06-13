@@ -46,6 +46,23 @@ export const themePreferenceSchema = z.object({
   theme: z.enum(["light", "dark", "system"]),
 });
 
+export const backgroundPreferenceSchema = z.object({
+  backgroundUrl: z
+    .string()
+    .trim()
+    .max(2_048)
+    .refine((value) => {
+      if (!value) return true;
+      try {
+        const url = new URL(value);
+        return url.protocol === "https:" && url.hostname === "images.unsplash.com";
+      } catch {
+        return false;
+      }
+    }, "Use a valid images.unsplash.com URL.")
+    .transform((value) => value || null),
+});
+
 export const vaultEnvelopeSchema = z.custom<ReturnType<typeof parseVaultFields>>(
   isVaultEnvelope,
   "Invalid vault envelope.",

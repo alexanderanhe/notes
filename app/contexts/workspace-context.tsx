@@ -23,6 +23,7 @@ interface WorkspaceContextValue extends WorkspaceState {
   openItem: (itemId: string) => void;
   closeItem: (itemId: string) => void;
   setActiveItem: (itemId: string | null) => void;
+  setOrganizationState: (state: Partial<Pick<WorkspaceState, "activeFolderId" | "activeTypeFilter" | "sidebarExpandedFolders">>) => void;
   setSidebarWidth: (width: number) => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
   updateNoteUiState: (
@@ -64,6 +65,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           activeNoteId: snapshot.activeNoteId,
           openItemIds: snapshot.openItemIds,
           activeItemId: snapshot.activeItemId,
+          activeFolderId: snapshot.activeFolderId,
+          activeTypeFilter: snapshot.activeTypeFilter,
+          activeTagFilter: null,
+          sidebarExpandedFolders: snapshot.sidebarExpandedFolders,
           sidebarWidth: snapshot.sidebarWidth,
           sidebarCollapsed: snapshot.sidebarCollapsed,
           noteUiState: snapshot.noteUiState,
@@ -189,6 +194,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [persistWorkspaceDebounced, updateWorkspace],
   );
 
+  const setOrganizationState = useCallback(
+    (state: Partial<Pick<WorkspaceState, "activeFolderId" | "activeTypeFilter" | "sidebarExpandedFolders">>) => {
+      updateWorkspace((current) => ({ ...current, ...state }));
+      persistWorkspaceDebounced();
+    },
+    [persistWorkspaceDebounced, updateWorkspace],
+  );
+
   const setSidebarWidth = useCallback(
     (sidebarWidth: number) => {
       updateWorkspace((current) => ({ ...current, sidebarWidth }));
@@ -237,6 +250,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         openItem,
         closeItem,
         setActiveItem,
+        setOrganizationState,
         setSidebarWidth,
         setSidebarCollapsed,
         updateNoteUiState,
