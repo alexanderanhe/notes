@@ -230,10 +230,18 @@ html.light {
 .vault-list-item.active { border-color: rgba(118, 87, 255, .25); background: linear-gradient(90deg, rgba(118,87,255,.22), rgba(75,65,162,.22)); }
 .vault-list-item strong { font-weight: 500; color: #f3f5f9; }
 .vault-list-item em { border: 1px solid #292752; border-radius: 5px; padding: 1px 6px; color: #a995ff; background: #1c1b3b; font-size: 11px; font-style: normal; }
-.vault-type-tile, .vault-preview-icon { display: grid; flex: none; place-items: center; border-radius: 8px; color: white; background: linear-gradient(135deg, #4f46e5, #7c3aed); }
+.vault-type-tile, .vault-preview-icon { display: grid; flex: none; place-items: center; border: 1px solid rgba(255,255,255,.08); border-radius: 8px; color: #c4d8ff; background: linear-gradient(135deg, #29313e, #171c25); box-shadow: inset 0 1px rgba(255,255,255,.04); }
 .vault-type-tile { width: 38px; height: 38px; }
 .vault-preview-icon { width: 68px; height: 68px; font-size: 32px; }
-.vault-favicon { overflow: hidden; border: 1px solid var(--vault-border); background: #ffffff; }
+.vault-favicon {
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--favicon-color, #64748b) 48%, var(--vault-border));
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--favicon-color, #64748b) 32%, #151c27),
+    color-mix(in srgb, var(--favicon-color, #64748b) 15%, #0d131b)
+  );
+}
 .vault-favicon img { width: 72%; height: 72%; object-fit: contain; }
 .vault-type-tile.type-note,
 .vault-preview-icon.type-note,
@@ -243,15 +251,27 @@ html.light {
   background: linear-gradient(145deg, #252e3a, #1b222c);
   box-shadow: inset 0 1px rgba(255,255,255,.05);
 }
-.type-password, .type-secret { background: linear-gradient(135deg, #5531ba, #7b3ec8); }
-.type-server, .type-database { background: linear-gradient(135deg, #17486b, #1d6591); }
-.type-identity { background: linear-gradient(135deg, #174a86, #246bc0); }
+.type-password, .type-secret, .type-recovery_codes { color: #ad91ff; background: linear-gradient(135deg, #282047, #171827); }
+.type-server { color: #a9c9ff; background: linear-gradient(135deg, #27303e, #171c25); }
+.type-database { color: #70c8ed; background: linear-gradient(135deg, #153444, #111d27); }
+.type-credit_card { color: #e8bc79; background: linear-gradient(135deg, #3a3021, #211b18); }
+.type-identity { color: #82b8ff; background: linear-gradient(135deg, #172f50, #111c2b); }
+.type-wifi { color: #6fd8c1; background: linear-gradient(135deg, #173b38, #102320); }
+.type-bookmark { color: #f2a9c5; background: linear-gradient(135deg, #402536, #231923); }
+.type-code_snippet { color: #7fd4e8; background: linear-gradient(135deg, #173842, #102126); }
+.type-checklist { color: #83d09a; background: linear-gradient(135deg, #1b3928, #122119); }
+.type-software_license, .type-template { color: #e3be75; background: linear-gradient(135deg, #3b3020, #211b16); }
+.type-secure_note { color: #b49cff; background: linear-gradient(135deg, #2b2447, #181827); }
 .vault-empty { display: grid; min-height: 240px; place-items: center; color: var(--vault-muted); }
 
 .vault-detail { display: none; grid-row: 2; min-width: 0; overflow: hidden; background: rgba(8, 13, 20, .54); }
 .vault-detail.is-open { display: block; }
-.vault-detail-scroll { height: 100%; overflow-y: auto; padding: 26px 30px 50px; }
-.vault-breadcrumbs { display: flex; align-items: center; gap: 9px; color: #7da2ff; font-size: 13px; }
+.vault-detail-scroll { height: 100%; overflow-x: hidden; overflow-y: auto; padding: 26px 30px 50px; }
+.vault-breadcrumbs { display: flex; min-width: 0; align-items: center; gap: 9px; color: #7da2ff; font-size: 13px; }
+.vault-breadcrumbs > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vault-breadcrumbs > button { display: flex; flex: none; align-items: center; gap: 5px; margin-left: 3px; border: 1px solid #263b6b; border-radius: 6px; padding: 4px 7px; color: #9cb6ff; background: #142445; font-size: 11px; }
+.vault-breadcrumbs > button:hover { color: white; border-color: #405d9d; }
+.vault-breadcrumbs > button:disabled { opacity: .45; }
 .vault-preview-header { display: flex; align-items: center; gap: 18px; margin-top: 32px; }
 .vault-preview-header h2 { font-size: 25px; font-weight: 600; color: white; }
 .vault-preview-header p { margin-top: 9px; color: var(--vault-muted); font-size: 12px; }
@@ -260,6 +280,12 @@ html.light {
 .vault-tags .vault-type-chip { border-color: #352b67; color: #ad91ff; background: #201943; }
 .vault-tags .vault-folder-chip { border-color: #263b6b; color: #8facff; background: #142445; }
 .vault-tags .vault-tag-chip { border-color: #17483d; color: #42cba2; background: #0c2825; }
+.vault-tags .vault-tags-manage { display: flex; align-items: center; gap: 4px; border: 1px dashed #31554d; border-radius: 5px; padding: 3px 8px; color: #69bda7; font-size: 11px; }
+.vault-tags .vault-tags-manage:hover { border-style: solid; color: #92ddc9; background: #0c2825; }
+.vault-tags .vault-tags-manage:disabled { opacity: .45; }
+.vault-preview-quick-edit { position: relative; z-index: 20; width: min(360px, 100%); margin-top: 10px; border: 1px solid #293445; border-radius: 9px; padding: 10px; background: #111824; box-shadow: 0 12px 35px #0007; }
+.vault-preview-tags-editor { width: min(480px, 100%); margin: 14px 0 -10px 86px; }
+.vault-preview-quick-edit .vault-folder-combobox-options { right: 0; left: 0; }
 .vault-preview-tabs { display: flex; align-items: center; gap: 28px; margin-top: 32px; border-bottom: 1px solid var(--vault-border); }
 .vault-preview-tabs > button:not(.vault-secondary-button) { border-bottom: 2px solid transparent; padding: 12px 7px; color: var(--vault-muted); }
 .vault-preview-tabs > button.active { border-color: var(--vault-purple); color: white; }
@@ -287,7 +313,6 @@ html.light {
 .vault-menu-action.danger { color: #f87171; }
 .vault-menu-action:disabled { opacity: .45; }
 .vault-menu-folder { display: block; padding: 6px 10px; color: var(--vault-muted); font-size: 11px; font-weight: 600; text-transform: uppercase; }
-.vault-menu-folder select { display: block; width: 100%; margin-top: 5px; border: 1px solid var(--vault-border); border-radius: 6px; padding: 7px; color: #eef2f8; background: #0b111a; font-size: 12px; font-weight: 400; text-transform: none; }
 .vault-back { display: none; align-items: center; gap: 8px; padding: 13px 16px; color: #c7bddf; }
 .vault-edit-heading { display: flex; justify-content: space-between; }
 .vault-edit-heading > .vault-secondary-button { align-self: flex-start; padding: 7px 11px; font-size: 12px; }
@@ -295,38 +320,82 @@ html.light {
 .vault-item-edit-intro > span { display: grid; width: 58px; height: 58px; place-items: center; border: 1px solid rgba(255,255,255,.08); border-radius: 10px; color: #c4d8ff; background: linear-gradient(135deg, #29313e, #171c25); font-size: 25px; box-shadow: inset 0 1px rgba(255,255,255,.04); }
 .vault-item-edit-intro h2 { font-size: 18px; font-weight: 600; }
 .vault-item-edit-intro p { margin-top: 3px; color: var(--vault-muted); font-size: 12px; }
-.vault-item-edit-intro > .type-password, .vault-item-edit-intro > .type-secret, .vault-item-edit-intro > .type-recovery_codes { color: #ad91ff; background: linear-gradient(135deg, #282047, #171827); }
-.vault-item-edit-intro > .type-server { color: #a9c9ff; background: linear-gradient(135deg, #27303e, #171c25); }
-.vault-item-edit-intro > .type-database { color: #70c8ed; background: linear-gradient(135deg, #153444, #111d27); }
-.vault-item-edit-intro > .type-credit_card { color: #e8bc79; background: linear-gradient(135deg, #3a3021, #211b18); }
-.vault-item-edit-intro > .type-identity { color: #82b8ff; background: linear-gradient(135deg, #172f50, #111c2b); }
-.vault-item-edit-intro > .type-wifi { color: #6fd8c1; background: linear-gradient(135deg, #173b38, #102320); }
-.vault-item-edit-intro > .type-bookmark { color: #f2a9c5; background: linear-gradient(135deg, #402536, #231923); }
-.vault-item-edit-intro > .type-code_snippet { color: #7fd4e8; background: linear-gradient(135deg, #173842, #102126); }
-.vault-item-edit-intro > .type-checklist { color: #83d09a; background: linear-gradient(135deg, #1b3928, #122119); }
-.vault-item-edit-intro > .type-software_license, .vault-item-edit-intro > .type-template { color: #e3be75; background: linear-gradient(135deg, #3b3020, #211b16); }
-.vault-item-edit-intro > .type-secure_note { color: #b49cff; background: linear-gradient(135deg, #2b2447, #181827); }
 .vault-legacy-note-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, .42fr); gap: 12px; margin-top: 22px; }
 .vault-legacy-note-fields label { border: 1px solid #171e29; border-radius: 9px; padding: 12px; color: var(--vault-muted); background: linear-gradient(145deg, #101620, #0d131b); font-size: 12px; }
 .vault-legacy-note-fields input, .vault-legacy-note-fields select { display: block; width: 100%; margin-top: 7px; border: 1px solid #222a36; border-radius: 7px; padding: 9px 11px; color: #eef2f8; background: #0e141d; outline: none; }
 .vault-legacy-note-fields input:focus, .vault-legacy-note-fields select:focus { border-color: #7657ff; }
-.vault-generic-item-form.is-password > label,
-.vault-generic-item-form.is-password > div:first-of-type,
-.vault-generic-item-form.is-password > .grid > label {
+.vault-form-card,
+.vault-code-editor-field {
+  display: block;
   border: 1px solid #171e29;
   border-radius: 9px;
   padding: 12px;
+  color: var(--vault-muted);
   background: linear-gradient(145deg, #101620, #0d131b);
+  font-size: 12px;
+  font-weight: 500;
   box-shadow: inset 0 1px rgba(255,255,255,.012), 0 8px 24px rgba(0,0,0,.08);
 }
-.vault-generic-item-form.is-password > .grid { gap: 10px; }
-.vault-generic-item-form.is-password input,
-.vault-generic-item-form.is-password select,
-.vault-generic-item-form.is-password textarea {
-  border-color: #222a36;
+.vault-generic-item-form > .grid { gap: 10px; }
+.vault-form-control {
+  border: 1px solid #222a36;
+  border-radius: 7px;
+  padding: 9px 11px;
+  color: #eef2f8;
   background: #0e141d;
+  font-size: 13px;
+  outline: none;
 }
-.light .vault-item-edit-intro > span { border-color: #d8dde7; color: #536076; background: #eef1f6; }
+.vault-form-control:focus { border-color: #7657ff; box-shadow: 0 0 0 1px #7657ff44; }
+.vault-form-card textarea { resize: vertical; }
+.vault-item-metadata { display: grid; width: 100%; max-width: 100%; grid-template-columns: minmax(0, 1.4fr) minmax(0, .8fr) minmax(0, 1fr); gap: 1px; overflow: visible; border: 1px solid #202938; border-radius: 9px; background: #202938; box-shadow: 0 8px 24px rgba(0,0,0,.08); }
+.vault-item-metadata > label, .vault-item-metadata > div { min-width: 0; padding: 9px 11px; background: linear-gradient(145deg, #101620, #0d131b); }
+.vault-item-metadata > :first-child { border-radius: 8px 0 0 8px; }
+.vault-item-metadata > :last-child { border-radius: 0 8px 8px 0; }
+.vault-metadata-title { display: block; }
+.vault-metadata-title > span, .vault-tags-input > label { display: block; color: var(--vault-muted); font-size: 10px; font-weight: 600; text-transform: uppercase; }
+.vault-metadata-title input { width: 100%; margin-top: 3px; color: #eef2f8; background: transparent; font-size: 14px; font-weight: 500; outline: none; }
+.vault-metadata-title input::placeholder { color: #737e8e; }
+.vault-tags-input.is-compact > .mt-1 { min-width: 0; margin-top: 3px; }
+.vault-tags-input.is-compact input { min-width: 0; padding: 1px 0; color: #eef2f8; background: transparent; font-size: 13px; outline: none; }
+.vault-tags-input.is-compact .mt-1 button { flex: none; border: 0; padding: 1px 4px; color: #9f8aff; font-size: 11px; }
+.vault-tags-input.is-compact .mt-2 { margin-top: 5px; }
+.vault-tags-input.is-compact .mt-2 button { border: 1px solid #352b67; color: #ad91ff; background: #201943; }
+.vault-item-metadata .vault-folder-combobox > span { font-size: 10px; }
+.vault-item-metadata .vault-folder-combobox-input { margin-top: 3px; border: 0; padding: 0; background: transparent; box-shadow: none; }
+.vault-item-metadata .vault-folder-combobox-input input { padding: 1px 0; font-size: 13px; }
+.vault-item-metadata .vault-folder-combobox-options { top: calc(100% + 2px); right: 0; left: 0; }
+.vault-folder-combobox { position: relative; }
+.vault-folder-combobox > span { display: block; color: var(--vault-muted); font-size: 12px; font-weight: 500; text-transform: none; }
+.vault-folder-combobox-input { display: flex; align-items: center; gap: 8px; margin-top: 7px; border: 1px solid #222a36; border-radius: 7px; padding: 0 10px; color: #9ca6b6; background: #0e141d; }
+.vault-folder-combobox-input:focus-within { border-color: #7657ff; box-shadow: 0 0 0 1px #7657ff44; }
+.vault-folder-combobox-input input { min-width: 0; width: 100%; border: 0; padding: 9px 0; color: #eef2f8; background: transparent; font-size: 13px; font-weight: 400; outline: none; text-transform: none; }
+.vault-folder-combobox-options { position: absolute; z-index: 120; top: calc(100% - 7px); right: 12px; left: 12px; max-height: 230px; overflow-y: auto; border: 1px solid #293445; border-radius: 8px; padding: 5px; background: #111824; box-shadow: 0 16px 45px #000a; }
+.vault-folder-combobox-options button { display: flex; width: 100%; align-items: center; gap: 8px; border-radius: 6px; padding: 8px; color: #d9deea; font-size: 12px; font-weight: 400; text-align: left; text-transform: none; }
+.vault-folder-combobox-options button.active { background: #20283a; }
+.vault-folder-combobox-options button.selected { color: #b8a8ff; }
+.vault-folder-combobox-options p { padding: 9px; color: var(--vault-muted); font-size: 12px; font-weight: 400; text-transform: none; }
+.vault-folder-combobox.is-compact > span { font-size: 11px; font-weight: 600; text-transform: uppercase; }
+.vault-folder-combobox.is-compact .vault-folder-combobox-input { margin-top: 5px; }
+.vault-folder-combobox.is-compact .vault-folder-combobox-options { top: calc(100% + 2px); right: 0; left: 0; }
+.vault-code-editor-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 9px; }
+.vault-code-editor-toolbar > span { display: flex; align-items: center; gap: 7px; color: #d9deea; }
+.vault-code-editor-toolbar label { min-width: 0; max-width: 60%; }
+.vault-code-editor-toolbar select { width: 100%; max-width: 220px; border: 1px solid #293445; border-radius: 6px; padding: 5px 26px 5px 8px; color: #cbd2df; background: #111824; font-size: 11px; font-weight: 500; outline: none; text-overflow: ellipsis; }
+.vault-code-editor-toolbar select:focus { border-color: #7657ff; }
+.vault-code-editor-field { width: 100%; max-width: 100%; min-width: 0; overflow: hidden; }
+.vault-code-editor { width: 100%; max-width: 100%; min-width: 0; overflow: hidden; border: 1px solid #222a36; border-radius: 7px; }
+.vault-code-editor > section { max-width: 100%; }
+.vault-code-editor .monaco-editor, .vault-code-editor .overflow-guard { border-radius: 7px; }
+.vault-code-editor-loading { display: grid; height: 360px; place-items: center; color: var(--vault-muted); font-size: 12px; }
+.vault-generic-item-form .wmde-markdown { border-radius: 7px; }
+.vault-generic-item-form > label,
+.vault-generic-item-form > div,
+.vault-generic-item-form > .grid > label {
+  min-width: 0;
+}
+.vault-generic-item-form, .vault-generic-item-form > .grid { width: 100%; max-width: 100%; min-width: 0; }
+.light .vault-type-tile, .light .vault-preview-icon, .light .vault-item-edit-intro > span { border-color: #d8dde7; color: #536076; background: #eef1f6; }
 .light .vault-type-tile.type-note,
 .light .vault-preview-icon.type-note,
 .light .vault-item-edit-intro > .type-note {
@@ -334,12 +403,17 @@ html.light {
   color: #41638f;
   background: linear-gradient(145deg, #edf2f7, #e3e9f1);
 }
-.light .vault-generic-item-form.is-password > label,
-.light .vault-generic-item-form.is-password > div:first-of-type,
-.light .vault-generic-item-form.is-password > .grid > label { border-color: #d8dde7; background: #f7f8fb; }
-.light .vault-generic-item-form.is-password input,
-.light .vault-generic-item-form.is-password select,
-.light .vault-generic-item-form.is-password textarea { background: #ffffff; }
+.light .vault-form-card, .light .vault-code-editor-field { border-color: #d8dde7; background: #f7f8fb; }
+.light .vault-item-metadata { border-color: #d8dde7; background: #d8dde7; }
+.light .vault-item-metadata > label, .light .vault-item-metadata > div { background: #f7f8fb; }
+.light .vault-metadata-title input, .light .vault-tags-input.is-compact input { color: #182033; }
+.light .vault-form-control, .light .vault-folder-combobox-input { border-color: #d8dde7; color: #182033; background: #ffffff; }
+.light .vault-folder-combobox-input input { color: #182033; }
+.light .vault-folder-combobox-options { border-color: #d8dde7; background: #ffffff; box-shadow: 0 16px 45px #34405433; }
+.light .vault-folder-combobox-options button { color: #344054; }
+.light .vault-folder-combobox-options button.active { background: #edf0f6; }
+.light .vault-code-editor-toolbar > span { color: #344054; }
+.light .vault-code-editor-toolbar select { border-color: #d8dde7; color: #344054; background: #ffffff; }
 .light .vault-legacy-note-fields label { border-color: #d8dde7; background: #f7f8fb; }
 .light .vault-legacy-note-fields input, .light .vault-legacy-note-fields select { border-color: #d8dde7; color: #182033; background: #ffffff; }
 .vault-mobile-password-form { display: none; }
@@ -385,10 +459,10 @@ html.light {
 .vault-ai-result pre { max-height: 260px; overflow: auto; white-space: pre-wrap; font-family: inherit; font-size: 13px; }
 .vault-ai-result button { margin-top: 14px; }
 .light .vault-note-menu { color: #182033; background: #ffffff; box-shadow: 0 18px 60px #34405433; }
+.light .vault-preview-quick-edit { border-color: #d8dde7; background: #ffffff; box-shadow: 0 12px 35px #34405422; }
 .light .vault-note-content-copy { color: #667085; background: rgba(255,255,255,.78); }
 .light .vault-note-content-copy:hover { color: #182033; background: #f3f5f9; }
 .light .vault-menu-action:hover, .light .vault-ai-actions button:hover { background: #edf0f6; }
-.light .vault-menu-folder select { color: #182033; background: #f9fafb; }
 
 @media (max-width: 1180px) {
   .vault-shell { grid-template-columns: 250px minmax(350px, 440px) minmax(400px, 1fr); }
@@ -417,7 +491,21 @@ html.light {
   .vault-back { display: flex; }
 }
 
+@media (max-width: 780px) {
+  .vault-item-metadata { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .vault-item-metadata > :first-child { grid-column: 1 / -1; border-radius: 8px 8px 0 0; }
+  .vault-item-metadata > :nth-child(2) { border-radius: 0 0 0 8px; }
+  .vault-item-metadata > :last-child { border-radius: 0 0 8px 0; }
+}
+
 @media (max-width: 640px) {
+  .vault-item-metadata { grid-template-columns: 1fr; }
+  .vault-item-metadata > :first-child { grid-column: auto; border-radius: 8px 8px 0 0; }
+  .vault-item-metadata > :nth-child(2) { border-radius: 0; }
+  .vault-item-metadata > :last-child { border-radius: 0 0 8px 8px; }
+  .vault-code-editor-toolbar { align-items: stretch; flex-direction: column; }
+  .vault-code-editor-toolbar label { max-width: none; }
+  .vault-code-editor-toolbar select { max-width: none; }
   .vault-topbar-brand, .vault-shell.sidebar-collapsed .vault-topbar-brand { display: flex; }
   .vault-topbar-brand img { width: 30px; height: 30px; }
   .vault-topbar .vault-search { flex: 1; width: auto; }
@@ -433,15 +521,14 @@ html.light {
   .vault-list-item { padding: 11px 6px; }
   .vault-preview-header { align-items: flex-start; margin-top: 15px; }
   .vault-preview-header { flex-wrap: wrap; }
+  .vault-preview-tags-editor { margin-left: 0; }
   .vault-note-menu-anchor { margin-left: auto; }
   .vault-note-menu { position: fixed; right: 12px; bottom: 12px; top: auto; left: 12px; width: auto; max-height: 75dvh; }
   .vault-ai-actions { grid-template-columns: 1fr; }
   .vault-preview-icon { width: 48px; height: 48px; font-size: 22px; }
   .vault-preview-tabs { gap: 12px; overflow-x: auto; }
   .vault-meta-card { grid-template-columns: 90px 1fr; }
-  .vault-edit-heading.is-password, .vault-generic-item-form.is-password { display: none; }
   .vault-legacy-note-fields { grid-template-columns: 1fr; }
-  .vault-mobile-password-form { display: block; padding-bottom: 28px; }
   .vault-mobile-password-top { display: flex; align-items: center; justify-content: space-between; margin: -2px 0 25px; color: #e6e9f0; }
   .vault-mobile-password-top span { font-weight: 600; }
   .vault-mobile-password-top button { color: #a78bfa; font-size: 13px; }

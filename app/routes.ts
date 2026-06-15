@@ -21,6 +21,7 @@ export default [
   route("api/preferences/background", "routes/api.preferences.background.ts"),
   route("api/unsplash/search", "routes/api.unsplash.search.ts"),
   route("api/unsplash/download", "routes/api.unsplash.download.ts"),
+  route("api/favicon", "routes/api.favicon.ts"),
   route("api/notes", "routes/api.notes.ts"),
   route("api/notes/:noteId", "routes/api.notes.$noteId.ts"),
   route("api/notes/:noteId/critical", "routes/api.notes.$noteId.critical.ts"),

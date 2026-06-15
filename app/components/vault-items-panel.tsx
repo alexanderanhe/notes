@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import {
   FiAlertTriangle, FiArchive, FiArrowLeft, FiBookmark, FiCheckSquare, FiChevronDown, FiChevronLeft, FiChevronRight, FiClock, FiCode,
   FiCopy, FiCpu, FiCreditCard, FiDatabase, FiEdit3, FiEye, FiEyeOff, FiFileText, FiFilter, FiFolder, FiGlobe, FiGrid, FiHash, FiKey, FiList,
@@ -17,7 +17,9 @@ import {
   decryptVaultItemPayload,
   generateSecurePassword,
   getDefaultPayloadForType,
+  moveItemToFolder,
   updateVaultItem,
+  updateVaultItemTags,
 } from "~/lib/vault-items.client";
 import {
   changeNoteExtraPassword,
@@ -38,6 +40,8 @@ import {
   type VaultItemType,
 } from "~/lib/vault-items";
 import { normalizeTags, type Folder, type FolderDeleteStrategy } from "~/lib/folders";
+
+const MonacoEditor = lazy(() => import("~/components/monaco-editor.client"));
 
 const SENSITIVE_FIELDS = new Set([
   "password", "totpSecret", "value", "connectionString", "licenseKey",
@@ -410,6 +414,37 @@ export function VaultItemsPanel({ email = "" }: { email?: string; onClose?: () =
     }
   }
 
+  async function moveDraftItem(folderId: string | null) {
+    if (!draft?.id) return;
+    setWorking(true);
+    try {
+      const { item } = await moveItemToFolder(draft.id, folderId);
+      setEncryptedItems((current) => [item, ...current.filter((entry) => entry.id !== item.id)]);
+      setDraft({ ...draft, folderId, updatedAt: item.updatedAt });
+      toast.success("Item moved");
+    } catch {
+      toast.error("The item could not be moved.");
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function updateDraftTags(tags: string[]) {
+    if (!draft?.id || !masterKey) return;
+    setWorking(true);
+    try {
+      const normalized = normalizeTags(tags);
+      const { item } = await updateVaultItemTags(draft, normalized, masterKey);
+      setEncryptedItems((current) => [item, ...current.filter((entry) => entry.id !== item.id)]);
+      setDraft({ ...draft, tags: normalized, updatedAt: item.updatedAt });
+      toast.success("Tags updated");
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : "Tags could not be updated.");
+    } finally {
+      setWorking(false);
+    }
+  }
+
   function confirmDelete() {
     if (!selectedId) return;
     toast.warning("Permanently delete this vault item?", {
@@ -571,8 +606,8 @@ export function VaultItemsPanel({ email = "" }: { email?: string; onClose?: () =
       {draft ? <main className={`vault-detail ${detailOpen ? "is-open" : ""}`}>
         <button type="button" onClick={() => setDetailOpen(false)} className="vault-back"><FiArrowLeft /> Back to {activeGroupTitle}</button>
         {editing
-          ? <div className="vault-detail-scroll"><div className={`vault-edit-heading ${draft.type === "password" ? "is-password" : ""}`}><VaultItemEditIntro type={draft.type} /><button type="button" onClick={() => setEditing(false)} className="vault-secondary-button">Cancel</button></div><VaultItemForm draft={draft} setDraft={setDraft} folders={folderState.folders} working={working} creating={!selectedId} onSave={() => void save().then(() => setEditing(false))} onDelete={selectedId ? confirmDelete : undefined} /></div>
-          : <VaultItemPreview item={draft} folders={breadcrumbs} onEdit={() => setEditing(true)} onFavorite={() => setDraft({ ...draft, favorite: !draft.favorite })} />}
+          ? <div className="vault-detail-scroll"><div className="vault-edit-heading"><VaultItemEditIntro type={draft.type} /><button type="button" onClick={() => setEditing(false)} className="vault-secondary-button">Cancel</button></div><VaultItemForm draft={draft} setDraft={setDraft} folders={folderState.folders} working={working} onSave={() => void save().then(() => setEditing(false))} onDelete={selectedId ? confirmDelete : undefined} /></div>
+          : <VaultItemPreview item={draft} folders={breadcrumbs} allFolders={folderState.folders} working={working} onEdit={() => setEditing(true)} onFavorite={() => setDraft({ ...draft, favorite: !draft.favorite })} onFolder={(folderId) => void moveDraftItem(folderId)} onTags={(tags) => void updateDraftTags(tags)} />}
       </main> : null}
       {legacyDraft ? <main className={`vault-detail ${detailOpen ? "is-open" : ""}`}>
         <button type="button" onClick={() => setDetailOpen(false)} className="vault-back"><FiArrowLeft /> Back to {activeGroupTitle}</button>
@@ -639,23 +674,61 @@ function VaultItemEditIntro({ type }: { type: VaultItemType }) {
 }
 
 function ItemVisual({ type, payload, large = false }: { type: VaultItemType; payload: Record<string, unknown>; large?: boolean }) {
-  const [failed, setFailed] = useState(false);
-  const faviconUrl = type === "password" ? getFaviconUrl(String(payload.url ?? "")) : null;
-  useEffect(() => setFailed(false), [faviconUrl]);
+  const faviconUrls = useMemo(() => "url" in payload ? getFaviconUrls(String(payload.url ?? "")) : [], [payload]);
+  const [faviconIndex, setFaviconIndex] = useState(0);
+  const [faviconColor, setFaviconColor] = useState<string | null>(null);
+  useEffect(() => { setFaviconIndex(0); setFaviconColor(null); }, [faviconUrls]);
   const className = large ? "vault-preview-icon" : "vault-type-tile";
-  if (faviconUrl && !failed) {
-    return <span className={`${className} vault-favicon`}><img src={faviconUrl} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(true)} /></span>;
+  const faviconUrl = faviconUrls[faviconIndex];
+  if (faviconUrl) {
+    return <span className={`${className} vault-favicon`} style={faviconColor ? { "--favicon-color": faviconColor } as React.CSSProperties : undefined}><img src={faviconUrl} alt="" loading="lazy" referrerPolicy="no-referrer" onLoad={(event) => setFaviconColor(getDominantFaviconColor(event.currentTarget))} onError={() => setFaviconIndex((index) => index + 1)} /></span>;
   }
   return <span className={`${className} type-${type}`}><TypeIcon type={type} /></span>;
 }
 
-function getFaviconUrl(value: string) {
+function getFaviconUrls(value: string) {
   const candidate = value.trim();
-  if (!candidate) return null;
+  if (!candidate) return [];
   try {
     const url = new URL(candidate.includes("://") ? candidate : `https://${candidate}`);
-    if (url.protocol !== "https:") return null;
-    return `${url.origin}/favicon.ico`;
+    if (url.protocol !== "https:") return [];
+    return [
+      `/api/favicon?domain=${encodeURIComponent(url.hostname)}`,
+      `${url.origin}/favicon.ico`,
+      `https://www.google.com/s2/favicons?domain=${encodeURIComponent(url.hostname)}&sz=128`,
+    ];
+  } catch {
+    return [];
+  }
+}
+
+function getDominantFaviconColor(image: HTMLImageElement) {
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = 32;
+    canvas.height = 32;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) return null;
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+    let red = 0;
+    let green = 0;
+    let blue = 0;
+    let weight = 0;
+    for (let index = 0; index < pixels.length; index += 4) {
+      const [r, g, b, alpha] = [pixels[index], pixels[index + 1], pixels[index + 2], pixels[index + 3]];
+      const maximum = Math.max(r, g, b);
+      const minimum = Math.min(r, g, b);
+      const saturation = maximum - minimum;
+      if (alpha < 128 || saturation < 30 || maximum > 245 || maximum < 25) continue;
+      const pixelWeight = saturation * (alpha / 255);
+      red += r * pixelWeight;
+      green += g * pixelWeight;
+      blue += b * pixelWeight;
+      weight += pixelWeight;
+    }
+    if (!weight) return null;
+    return `rgb(${Math.round(red / weight)} ${Math.round(green / weight)} ${Math.round(blue / weight)})`;
   } catch {
     return null;
   }
@@ -714,16 +787,29 @@ function FolderTree({ folders, activeFolderId, counts, onSelect, onRename, onDel
   return <div className="vault-folder-tree">{render(null)}</div>;
 }
 
-function VaultItemPreview({ item, folders, onEdit, onFavorite }: { item: VaultItem; folders: Folder[]; onEdit: () => void; onFavorite: () => void }) {
+function VaultItemPreview({ item, folders, allFolders, working, onEdit, onFavorite, onFolder, onTags }: {
+  item: VaultItem;
+  folders: Folder[];
+  allFolders: Folder[];
+  working: boolean;
+  onEdit: () => void;
+  onFavorite: () => void;
+  onFolder: (folderId: string | null) => void;
+  onTags: (tags: string[]) => void;
+}) {
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
+  const [folderOpen, setFolderOpen] = useState(false);
+  const [tagsOpen, setTagsOpen] = useState(false);
   const payload = item.payload as Record<string, unknown>;
   return <div className="vault-detail-scroll">
-    <div className="vault-breadcrumbs"><FiFolder />{folders.length ? folders.map((folder) => folder.name).join("  ›  ") : "Uncategorized"}</div>
+    <div className="vault-breadcrumbs"><FiFolder /><span>{folders.length ? folders.map((folder) => folder.name).join("  ›  ") : "Uncategorized"}</span><button type="button" disabled={working} onClick={() => setFolderOpen((open) => !open)}><FiEdit3 /> Move</button></div>
+    {folderOpen ? <div className="vault-preview-quick-edit"><FolderCombobox label="Move to folder" value={item.folderId} folders={allFolders} onChange={(folderId) => { onFolder(folderId); setFolderOpen(false); }} compact /></div> : null}
     <header className="vault-preview-header">
       <ItemVisual type={item.type} payload={payload} large />
-      <div className="min-w-0 flex-1"><h2>{item.title || "Untitled"}</h2><div className="vault-tags"><span className="vault-type-chip">{VAULT_ITEM_LABELS[item.type]}</span>{folders.at(-1) ? <span className="vault-folder-chip">{folders.at(-1)!.name}</span> : null}{item.tags.map((tag) => <span className="vault-tag-chip" key={tag}># {tag}</span>)}</div><p>Updated {formatHumanDate(item.updatedAt)} &nbsp;&nbsp; Created {formatHumanDate(item.createdAt)}</p></div>
+      <div className="min-w-0 flex-1"><h2>{item.title || "Untitled"}</h2><div className="vault-tags"><span className="vault-type-chip">{VAULT_ITEM_LABELS[item.type]}</span>{folders.at(-1) ? <span className="vault-folder-chip">{folders.at(-1)!.name}</span> : null}{item.tags.map((tag) => <span className="vault-tag-chip" key={tag}># {tag}</span>)}<button type="button" disabled={working} className="vault-tags-manage" onClick={() => setTagsOpen((open) => !open)}><FiPlus /> Manage tags</button></div><p>Updated {formatHumanDate(item.updatedAt)} &nbsp;&nbsp; Created {formatHumanDate(item.createdAt)}</p></div>
       <button type="button" onClick={onFavorite} className="vault-icon-button"><FiStar className={item.favorite ? "fill-amber-400 text-amber-400" : ""} /></button><button type="button" className="vault-icon-button"><FiMoreVertical /></button>
     </header>
+    {tagsOpen ? <div className="vault-preview-quick-edit vault-preview-tags-editor"><TagInput tags={item.tags} onChange={onTags} compact /></div> : null}
     <div className="vault-preview-tabs"><button className="active">Details</button><button>Notes</button><button>History</button><button type="button" className="ml-auto vault-secondary-button" onClick={onEdit}><FiEdit3 /> Edit</button></div>
     <section className="vault-detail-card">
       {Object.entries(item.payload).map(([field, rawValue]) => {
@@ -754,6 +840,7 @@ function LegacyNoteDetail({ note, editing, working, folders, onEdit, onCancel, o
   onLocalAI: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [folderOpen, setFolderOpen] = useState(false);
   const breadcrumbs = folderBreadcrumbs(folders, note.encrypted.folderId);
   const copy = () => void navigator.clipboard.writeText(note.content).then(() => toast.success("Note copied"));
   if (editing) {
@@ -761,14 +848,15 @@ function LegacyNoteDetail({ note, editing, working, folders, onEdit, onCancel, o
       <div className="vault-edit-heading"><VaultItemEditIntro type="note" /><button type="button" onClick={onCancel} className="vault-secondary-button">Cancel</button></div>
       <div className="vault-legacy-note-fields">
         <label>Title<input value={note.title} onChange={(event) => onChange({ ...note, title: event.target.value })} /></label>
-        <label>Folder<select value={note.encrypted.folderId ?? ""} onChange={(event) => onFolder(event.target.value || null)}><option value="">Uncategorized</option>{folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></label>
+        <FolderCombobox label="Folder" value={note.encrypted.folderId} folders={folders} onChange={onFolder} />
       </div>
       <div className="mt-5" data-color-mode="dark"><MDEditor value={note.content} onChange={(content) => onChange({ ...note, content: content ?? "" })} preview="edit" height={500} /></div>
       <div className="mt-5 flex flex-wrap items-center gap-4"><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={note.pinned} onChange={(event) => onChange({ ...note, pinned: event.target.checked })} />Favorite</label><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={note.archived} onChange={(event) => onChange({ ...note, archived: event.target.checked })} />Archived</label><button type="button" disabled={working} onClick={onSave} className="vault-primary-button ml-auto"><FiSave /> Save note</button></div>
     </div>;
   }
   return <div className="vault-detail-scroll">
-    <div className="vault-breadcrumbs"><FiFolder />{breadcrumbs.length ? breadcrumbs.map((folder) => folder.name).join("  ›  ") : "Uncategorized"}</div>
+    <div className="vault-breadcrumbs"><FiFolder /><span>{breadcrumbs.length ? breadcrumbs.map((folder) => folder.name).join("  ›  ") : "Uncategorized"}</span><button type="button" disabled={working} onClick={() => setFolderOpen((open) => !open)}><FiEdit3 /> Move</button></div>
+    {folderOpen ? <div className="vault-preview-quick-edit"><FolderCombobox label="Move to folder" value={note.encrypted.folderId} folders={folders} onChange={(folderId) => { onFolder(folderId); setFolderOpen(false); }} compact /></div> : null}
     <header className="vault-preview-header"><span className="vault-preview-icon type-note"><FiFileText /></span><div className="min-w-0 flex-1"><h2>{note.title || "Untitled"}</h2><div className="vault-tags"><span className="vault-type-chip">Note</span>{breadcrumbs.at(-1) ? <span className="vault-folder-chip">{breadcrumbs.at(-1)!.name}</span> : null}{note.encrypted.isCritical ? <span className="vault-tag-chip">Critical</span> : null}</div><p>Updated {formatHumanDate(note.encrypted.updatedAt)} &nbsp;&nbsp; Created {formatHumanDate(note.encrypted.createdAt)}</p></div><button type="button" className="vault-icon-button" onClick={onPin}><FiStar className={note.pinned ? "fill-amber-400 text-amber-400" : "text-slate-400"} /></button><button type="button" className="vault-secondary-button" onClick={onEdit}><FiEdit3 /> Edit</button><div className="vault-note-menu-anchor"><button type="button" className="vault-icon-button" onClick={() => setMenuOpen((value) => !value)}><FiMoreVertical /></button>{menuOpen ? <NoteActionsMenu note={note} folders={folders} working={working} onClose={() => setMenuOpen(false)} onCopy={copy} onPin={onPin} onArchive={onArchive} onFolder={onFolder} onCritical={onCritical} onProtection={onProtection} onDelete={onDelete} onLocalAI={onLocalAI} /> : null}</div></header>
     <div className="vault-preview-tabs"><button className="active">Note</button><button>History</button></div>
     <section className="vault-detail-card vault-note-content"><button type="button" title="Copy note" aria-label="Copy note" className="vault-note-content-copy" onClick={copy}><FiCopy /></button>{note.content ? <MDEditor.Markdown source={note.content} /> : <p className="text-slate-400">This note has no content.</p>}</section>
@@ -784,7 +872,7 @@ function NoteActionsMenu({ note, folders, working, onClose, onCopy, onPin, onArc
     <MenuAction icon={<FiCopy />} label="Copy" onClick={() => action(onCopy)} />
     <MenuAction icon={<FiStar />} label={note.pinned ? "Unpin" : "Pin"} onClick={() => action(onPin)} />
     <MenuAction icon={<FiArchive />} label={note.archived ? "Unarchive" : "Archive"} onClick={() => action(onArchive)} />
-    <label className="vault-menu-folder">Folder<select value={note.encrypted.folderId ?? ""} onChange={(event) => action(() => onFolder(event.target.value || null))}><option value="">Uncategorized</option>{folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></label>
+    <div className="vault-menu-folder"><FolderCombobox label="Folder" value={note.encrypted.folderId} folders={folders} onChange={(folderId) => action(() => onFolder(folderId))} compact /></div>
     <MenuDivider />
     <MenuLabel label="Intelligence" /><MenuAction icon={<FiCpu />} label="Local AI" onClick={() => action(onLocalAI)} />
     <MenuDivider />
@@ -804,7 +892,7 @@ function FilterDialog({ type, folderId, tag, folders, tags, onClose, onApply }: 
   const [nextType, setNextType] = useState(type);
   const [nextFolder, setNextFolder] = useState(folderId);
   const [nextTag, setNextTag] = useState(tag);
-  return <div className="vault-dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="vault-dialog"><header><div><h3>Filter items</h3><p>Combine filters to narrow this group.</p></div><button type="button" className="vault-icon-button" onClick={onClose}><FiX /></button></header><label>Type<select value={nextType} onChange={(event) => setNextType(event.target.value as VaultItemType | "all")}><option value="all">All types</option>{VAULT_ITEM_TYPES.map((value) => <option value={value} key={value}>{VAULT_ITEM_LABELS[value]}</option>)}</select></label><label>Folder<select value={nextFolder ?? ""} onChange={(event) => setNextFolder(event.target.value || null)}><option value="">All folders</option>{folders.map((folder) => <option value={folder.id} key={folder.id}>{folder.name}</option>)}</select></label><label>Tag<select value={nextTag ?? ""} onChange={(event) => setNextTag(event.target.value || null)}><option value="">All tags</option>{tags.map((value) => <option value={value} key={value}># {value}</option>)}</select></label><footer><button type="button" className="vault-secondary-button" onClick={() => { setNextType("all"); setNextFolder(null); setNextTag(null); }}>Clear</button><button type="button" className="vault-primary-button" onClick={() => onApply({ type: nextType, folderId: nextFolder, tag: nextTag })}>Apply filters</button></footer></section></div>;
+  return <div className="vault-dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="vault-dialog"><header><div><h3>Filter items</h3><p>Combine filters to narrow this group.</p></div><button type="button" className="vault-icon-button" onClick={onClose}><FiX /></button></header><label>Type<select value={nextType} onChange={(event) => setNextType(event.target.value as VaultItemType | "all")}><option value="all">All types</option>{VAULT_ITEM_TYPES.map((value) => <option value={value} key={value}>{VAULT_ITEM_LABELS[value]}</option>)}</select></label><FolderCombobox label="Folder" value={nextFolder} folders={folders} emptyLabel="All folders" onChange={setNextFolder} /><label>Tag<select value={nextTag ?? ""} onChange={(event) => setNextTag(event.target.value || null)}><option value="">All tags</option>{tags.map((value) => <option value={value} key={value}># {value}</option>)}</select></label><footer><button type="button" className="vault-secondary-button" onClick={() => { setNextType("all"); setNextFolder(null); setNextTag(null); }}>Clear</button><button type="button" className="vault-primary-button" onClick={() => onApply({ type: nextType, folderId: nextFolder, tag: nextTag })}>Apply filters</button></footer></section></div>;
 }
 
 function ProtectedNoteDialog({ working, onClose, onUnlock }: { working: boolean; onClose: () => void; onUnlock: (password: string) => void }) {
@@ -887,12 +975,7 @@ function FolderDialog({ mode, folder, defaultParentFolderId, folders, onClose, o
     <form onSubmit={(event) => { event.preventDefault(); void onSubmit(name, parentFolderId); }} className="vault-dialog">
       <h3 className="font-semibold">{mode === "create" ? "Create folder" : "Rename or move folder"}</h3>
       <Field label="Folder name" value={name} onChange={setName} />
-      <label className="mt-4 block text-xs font-medium text-zinc-500">Parent folder
-        <select value={parentFolderId ?? ""} onChange={(event) => setParentFolderId(event.target.value || null)}>
-          <option value="">No parent</option>
-          {folders.filter((candidate) => candidate.id !== folder?.id).map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}
-        </select>
-      </label>
+      <FolderCombobox label="Parent folder" value={parentFolderId} folders={folders.filter((candidate) => candidate.id !== folder?.id)} emptyLabel="No parent" onChange={setParentFolderId} />
       <footer><button type="button" onClick={onClose} className="vault-secondary-button">Cancel</button><button disabled={!name.trim()} className="vault-primary-button disabled:opacity-50">Save folder</button></footer>
     </form>
   </div>;
@@ -936,12 +1019,11 @@ function FolderDeleteDialog({ folder, onClose, onDelete }: { folder: Folder; onC
   </div>;
 }
 
-function VaultItemForm({ draft, setDraft, folders, working, creating, onSave, onDelete }: {
+function VaultItemForm({ draft, setDraft, folders, working, onSave, onDelete }: {
   draft: VaultItem;
   setDraft: (draft: VaultItem) => void;
   folders: Folder[];
   working: boolean;
-  creating: boolean;
   onSave: () => void;
   onDelete?: () => void;
 }) {
@@ -995,32 +1077,15 @@ function VaultItemForm({ draft, setDraft, folders, working, creating, onSave, on
     });
   };
 
-  return <>
-    {draft.type === "password" ? <MobilePasswordForm
-      draft={draft}
-      setDraft={setDraft}
-      working={working}
-      creating={creating}
-      revealed={Boolean(revealed.password)}
-      onToggleReveal={() => confirmReveal("password")}
-      generator={generator}
-      generatedPassword={generatedPassword}
-      onGeneratorChange={setGenerator}
-      onGenerate={generatePassword}
-      onUseGenerated={useGeneratedPassword}
-      onSave={onSave}
-    /> : null}
-    <div className={`vault-generic-item-form mt-5 space-y-4 ${draft.type === "password" ? "is-password" : ""}`}>
-    <Field label="Title" value={draft.title} onChange={(title) => setDraft({ ...draft, title })} />
-    <TagInput tags={draft.tags} onChange={(tags) => setDraft({ ...draft, tags })} />
-    <label className="block text-xs font-medium text-zinc-500">Folder
-      <select value={draft.folderId ?? ""} onChange={(event) => setDraft({ ...draft, folderId: event.target.value || null })} className="mt-1 w-full rounded-md border border-zinc-300 bg-transparent px-3 py-2 text-sm dark:border-zinc-700">
-        <option value="">Uncategorized</option>
-        {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
-      </select>
-    </label>
+  return <div className="vault-generic-item-form mt-5 space-y-4">
+    <section className="vault-item-metadata">
+      <label className="vault-metadata-title"><span>Title</span><input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="Untitled item" /></label>
+      <FolderCombobox label="Folder" value={draft.folderId} folders={folders} onChange={(folderId) => setDraft({ ...draft, folderId })} compact />
+      <TagInput tags={draft.tags} onChange={(tags) => setDraft({ ...draft, tags })} compact />
+    </section>
     <div className="grid gap-4 md:grid-cols-2">
       {Object.entries(draft.payload).map(([field, rawValue]) => {
+        if (draft.type === "code_snippet" && field === "language") return null;
         const sensitive = SENSITIVE_FIELDS.has(field);
         const multiline = ["markdown", "notes", "text", "code", "codes", "items"].includes(field);
         const value = field === "codes"
@@ -1029,12 +1094,21 @@ function VaultItemForm({ draft, setDraft, folders, working, creating, onSave, on
             ? (rawValue as { text: string }[]).map((item) => item.text).join("\n")
             : String(rawValue ?? "");
         if (field === "markdown") {
-          return <label key={field} className="block text-xs font-medium text-zinc-500 md:col-span-2">
+          return <label key={field} className="vault-form-card md:col-span-2">
             {FIELD_LABELS[field]}
             <div data-color-mode={document.documentElement.classList.contains("dark") ? "dark" : "light"} className="mt-1">
               <MDEditor value={value} onChange={(next) => setPayload(field, next ?? "")} preview="edit" height={360} />
             </div>
           </label>;
+        }
+        if (field === "code") {
+          return <CodeEditorField
+            key={field}
+            value={value}
+            language={String((draft.payload as Record<string, unknown>).language || "")}
+            onLanguageChange={(language) => setPayload("language", language)}
+            onChange={(next) => setPayload(field, next)}
+          />;
         }
         return <Field
           key={field}
@@ -1042,11 +1116,14 @@ function VaultItemForm({ draft, setDraft, folders, working, creating, onSave, on
           value={value}
           multiline={multiline}
           secret={sensitive && !revealed[field]}
+          type={field === "url" ? "url" : field === "accountEmail" ? "email" : field === "expiresAt" ? "date" : "text"}
+          inputMode={field === "number" || field === "cvv" || field === "expiryMonth" || field === "expiryYear" || field === "port" ? "numeric" : undefined}
+          placeholder={field === "number" ? "1234 5678 9012 3456" : field === "expiryMonth" ? "MM" : field === "expiryYear" ? "YYYY" : undefined}
           onChange={(next) => setPayload(field,
             field === "port" ? Number(next) || undefined
               : field === "codes" ? next.split("\n").filter(Boolean)
                 : field === "items" ? next.split("\n").filter(Boolean).map((text, index) => ({ id: String(index + 1), text, checked: false }))
-                  : next)}
+                  : formatFieldValue(field, next))}
           actions={sensitive || field === "username" ? <>
             {sensitive ? <button type="button" title={revealed[field] ? "Hide" : "Reveal"} onClick={() => confirmReveal(field)} className="rounded p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800">{revealed[field] ? <FiEyeOff /> : <FiEye />}</button> : null}
             <button type="button" title="Copy and clear clipboard after 30 seconds" onClick={() => void copySensitiveValue(value).then(() => toast.success("Copied; clipboard will clear in 30 seconds"))} className="rounded p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800"><FiCopy /></button>
@@ -1075,8 +1152,7 @@ function VaultItemForm({ draft, setDraft, folders, working, creating, onSave, on
         }}
       />
     ) : null}
-    </div>
-  </>;
+  </div>;
 }
 
 function MobilePasswordForm({ draft, setDraft, working, creating, revealed, onToggleReveal, generator, generatedPassword, onGeneratorChange, onGenerate, onUseGenerated, onSave }: {
@@ -1234,7 +1310,7 @@ function PasswordGeneratorModal({ options, password, onChange, onGenerate, onUse
   </div>;
 }
 
-function TagInput({ tags, onChange }: { tags: string[]; onChange: (tags: string[]) => void }) {
+function TagInput({ tags, onChange, compact = false }: { tags: string[]; onChange: (tags: string[]) => void; compact?: boolean }) {
   const [value, setValue] = useState("");
   const add = () => {
     try {
@@ -1245,29 +1321,171 @@ function TagInput({ tags, onChange }: { tags: string[]; onChange: (tags: string[
       toast.error(cause instanceof Error ? cause.message : "Invalid tag.");
     }
   };
-  return <div>
+  return <div className={compact ? "vault-tags-input is-compact" : "vault-form-card"}>
     <label className="block text-xs font-medium text-zinc-500">Tags</label>
     <div className="mt-1 flex gap-2">
-      <input value={value} maxLength={40} onChange={(event) => setValue(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); add(); } }} placeholder="Add encrypted tag" className="min-w-0 flex-1 rounded-md border border-zinc-300 bg-transparent px-3 py-2 text-sm outline-none dark:border-zinc-700" />
+      <input value={value} maxLength={40} onChange={(event) => setValue(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); add(); } }} placeholder={compact ? "Add tag" : "Add encrypted tag"} className={compact ? "min-w-0 flex-1" : "vault-form-control min-w-0 flex-1"} />
       <button type="button" onClick={add} disabled={!value.trim()} className="rounded-md border border-zinc-300 px-3 text-sm disabled:opacity-50 dark:border-zinc-700">Add</button>
     </div>
     <div className="mt-2 flex flex-wrap gap-1">{tags.map((tag) => <button type="button" key={tag} onClick={() => onChange(tags.filter((value) => value !== tag))} className="rounded-full bg-zinc-100 px-2 py-1 text-[11px] dark:bg-zinc-800">#{tag} ×</button>)}</div>
   </div>;
 }
 
-function Field({ label, value, onChange, multiline, secret, actions }: {
+function FolderCombobox({ label, value, folders, onChange, emptyLabel = "Uncategorized", compact = false }: {
+  label: string;
+  value: string | null;
+  folders: Folder[];
+  onChange: (folderId: string | null) => void;
+  emptyLabel?: string;
+  compact?: boolean;
+}) {
+  const rootRef = useRef<HTMLLabelElement>(null);
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [activeIndex, setActiveIndex] = useState(0);
+  const folderPath = (folder: Folder) => folderBreadcrumbs(folders, folder.id).map((entry) => entry.name).join(" / ");
+  const options = [{ id: null, name: emptyLabel }, ...folders.map((folder) => ({ id: folder.id, name: folderPath(folder) }))];
+  const selected = options.find((option) => option.id === value) ?? options[0];
+  const filtered = options.filter((option) => option.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
+
+  useEffect(() => {
+    const close = (event: MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, []);
+  useEffect(() => setActiveIndex(0), [query]);
+
+  const choose = (option: (typeof options)[number]) => {
+    onChange(option.id);
+    setQuery("");
+    setOpen(false);
+  };
+  return <label ref={rootRef} className={`vault-folder-combobox ${compact ? "is-compact" : "vault-form-card"}`}>
+    <span>{label}</span>
+    <div className="vault-folder-combobox-input">
+      <FiSearch />
+      <input
+        role="combobox"
+        aria-expanded={open}
+        aria-autocomplete="list"
+        value={open ? query : selected.name}
+        onFocus={() => { setOpen(true); setQuery(""); }}
+        onChange={(event) => { setQuery(event.target.value); setOpen(true); }}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowDown") { event.preventDefault(); setOpen(true); setActiveIndex((index) => Math.min(index + 1, Math.max(0, filtered.length - 1))); }
+          if (event.key === "ArrowUp") { event.preventDefault(); setActiveIndex((index) => Math.max(0, index - 1)); }
+          if (event.key === "Enter" && open && filtered[activeIndex]) { event.preventDefault(); choose(filtered[activeIndex]); }
+          if (event.key === "Escape") { setOpen(false); setQuery(""); }
+        }}
+      />
+      <FiChevronDown />
+    </div>
+    {open ? <div className="vault-folder-combobox-options" role="listbox">
+      {filtered.length ? filtered.map((option, index) => <button type="button" role="option" aria-selected={option.id === value} className={`${index === activeIndex ? "active" : ""} ${option.id === value ? "selected" : ""}`} key={option.id ?? "empty"} onMouseEnter={() => setActiveIndex(index)} onMouseDown={(event) => event.preventDefault()} onClick={() => choose(option)}><FiFolder /><span>{option.name}</span></button>) : <p>No folders found</p>}
+    </div> : null}
+  </label>;
+}
+
+const CODE_LANGUAGES = [
+  ["", "Auto detect"],
+  ["javascript", "JavaScript"],
+  ["typescript", "TypeScript"],
+  ["python", "Python"],
+  ["json", "JSON"],
+  ["html", "HTML"],
+  ["css", "CSS"],
+  ["sql", "SQL"],
+  ["shell", "Shell"],
+  ["markdown", "Markdown"],
+  ["yaml", "YAML"],
+  ["dockerfile", "Dockerfile"],
+  ["plaintext", "Plain text"],
+] as const;
+
+function CodeEditorField({ value, language, onChange, onLanguageChange }: {
+  value: string;
+  language: string;
+  onChange: (value: string) => void;
+  onLanguageChange: (language: string) => void;
+}) {
+  const detectedLanguage = detectCodeLanguage(value);
+  const activeLanguage = normalizeMonacoLanguage(language || detectedLanguage);
+  const detectedLabel = CODE_LANGUAGES.find(([value]) => value === detectedLanguage)?.[1] ?? detectedLanguage;
+  return <section className="vault-code-editor-field md:col-span-2">
+    <span className="vault-code-editor-toolbar">
+      <span><FiCode /> Code</span>
+      <label>
+        <span className="sr-only">Language</span>
+        <select value={language} onChange={(event) => onLanguageChange(event.target.value)}>
+          {CODE_LANGUAGES.map(([value, label]) => <option value={value} key={value || "auto"}>{label}{!value ? ` (${detectedLabel})` : ""}</option>)}
+        </select>
+      </label>
+    </span>
+    <div className="vault-code-editor">
+      <Suspense fallback={<div className="vault-code-editor-loading">Loading code editor...</div>}>
+        <MonacoEditor
+          height="360px"
+          language={activeLanguage}
+          value={value}
+          theme={typeof document !== "undefined" && document.documentElement.classList.contains("light") ? "light" : "vs-dark"}
+          onChange={(next) => onChange(next ?? "")}
+          options={{ minimap: { enabled: false }, fontSize: 13, lineNumbersMinChars: 3, padding: { top: 12 }, scrollBeyondLastLine: false, wordWrap: "on" }}
+        />
+      </Suspense>
+    </div>
+  </section>;
+}
+
+function detectCodeLanguage(code: string) {
+  const source = code.trim();
+  if (!source) return "plaintext";
+  if (/^#!.*\b(?:bash|sh|zsh)\b/.test(source) || /\b(?:echo|fi|done|export)\b/.test(source)) return "shell";
+  if (/^(?:FROM|RUN|CMD|ENTRYPOINT|COPY|WORKDIR|EXPOSE)\s/im.test(source)) return "dockerfile";
+  if (/^\s*[{[]/.test(source)) {
+    try { JSON.parse(source); return "json"; } catch { /* Continue detecting. */ }
+  }
+  if (/<!doctype html>|<\/?[a-z][\s\S]*>/i.test(source)) return "html";
+  if (/(?:^|\n)\s*(?:SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER)\b/i.test(source)) return "sql";
+  if (/(?:^|\n)\s*(?:def |from \S+ import |import \S+|print\(|class \w+[:(])/.test(source)) return "python";
+  if (/\b(?:interface|type|enum)\s+\w+|:\s*(?:string|number|boolean)\b/.test(source)) return "typescript";
+  if (/\b(?:const|let|var|function|import|export|console\.)\b|=>/.test(source)) return "javascript";
+  if (/(?:^|\n)\s*[.#]?[a-z][^{]+\{[^}]*:[^}]*\}/i.test(source)) return "css";
+  if (/^(?:---\s*\n)?[\w-]+:\s+\S+/m.test(source)) return "yaml";
+  if (/^#{1,6}\s+|^\s*[-*]\s+|\[[^\]]+\]\([^)]+\)/m.test(source)) return "markdown";
+  return "plaintext";
+}
+
+function normalizeMonacoLanguage(language: string) {
+  const normalized = language.trim().toLocaleLowerCase();
+  return ({ js: "javascript", ts: "typescript", py: "python", sh: "shell", bash: "shell", yml: "yaml", md: "markdown" } as Record<string, string>)[normalized] || normalized || "plaintext";
+}
+
+function formatFieldValue(field: string, value: string) {
+  if (field === "number") return value.replace(/\D/g, "").slice(0, 19).replace(/(.{4})/g, "$1 ").trim();
+  if (field === "cvv") return value.replace(/\D/g, "").slice(0, 4);
+  if (field === "expiryMonth") return value.replace(/\D/g, "").slice(0, 2);
+  if (field === "expiryYear") return value.replace(/\D/g, "").slice(0, 4);
+  return value;
+}
+
+function Field({ label, value, onChange, multiline, secret, actions, type = "text", inputMode, placeholder }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   multiline?: boolean;
   secret?: boolean;
   actions?: React.ReactNode;
+  type?: React.HTMLInputTypeAttribute;
+  inputMode?: React.HTMLAttributes<HTMLInputElement>["inputMode"];
+  placeholder?: string;
 }) {
-  const className = "mt-1 w-full rounded-md border border-zinc-300 bg-transparent px-3 py-2 text-sm outline-none dark:border-zinc-700";
-  return <label className={`${multiline ? "md:col-span-2" : ""} block text-xs font-medium text-zinc-500`}>
+  const className = "vault-form-control mt-1 w-full";
+  return <label className={`${multiline ? "md:col-span-2" : ""} vault-form-card`}>
     {label}
     <span className="flex items-start gap-1">
-      {multiline ? <textarea value={value} onChange={(event) => onChange(event.target.value)} rows={6} className={className} /> : <input type={secret ? "password" : "text"} autoComplete="off" value={value} onChange={(event) => onChange(event.target.value)} className={className} />}
+      {multiline ? <textarea value={value} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} rows={6} className={className} /> : <input type={secret ? "password" : type} inputMode={inputMode} placeholder={placeholder} autoComplete="off" value={value} onChange={(event) => onChange(event.target.value)} className={className} />}
       {actions ? <span className="mt-1 flex">{actions}</span> : null}
     </span>
   </label>;

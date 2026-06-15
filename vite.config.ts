@@ -4,6 +4,14 @@ import { defineConfig } from "vite";
 
 export default defineConfig({
   plugins: [tailwindcss(), reactRouter()],
+  optimizeDeps: {
+    include: [
+      "@monaco-editor/react",
+      "@uiw/react-md-editor/nohighlight",
+      "react-icons/fi",
+      "sonner",
+    ],
+  },
   resolve: {
     tsconfigPaths: true,
   },
