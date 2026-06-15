@@ -1,7 +1,10 @@
+import type { DocumentPayload } from "~/lib/document-blocks";
+
 export const VAULT_ITEM_ENCRYPTION_VERSION = 1;
 
 export const VAULT_ITEM_TYPES = [
   "note",
+  "document",
   "password",
   "secure_note",
   "secret",
@@ -22,6 +25,7 @@ export type VaultItemType = (typeof VAULT_ITEM_TYPES)[number];
 
 export interface VaultItemPayloadMap {
   note: { markdown: string };
+  document: DocumentPayload;
   password: { username: string; password: string; url: string; notes: string; totpSecret?: string };
   secure_note: { text: string };
   secret: { name: string; value: string; environment?: "development" | "staging" | "production" | "local"; notes?: string };
@@ -76,7 +80,8 @@ export interface EncryptedVaultItem extends EncryptedVaultItemInput {
 }
 
 export const VAULT_ITEM_LABELS: Record<VaultItemType, string> = {
-  note: "Note",
+  note: "Document",
+  document: "Document",
   password: "Password",
   secure_note: "Secure note",
   secret: "Secret",
@@ -92,3 +97,11 @@ export const VAULT_ITEM_LABELS: Record<VaultItemType, string> = {
   checklist: "Checklist",
   template: "Template",
 };
+
+export function isDocumentVaultItemType(type: VaultItemType) {
+  return type === "note" || type === "document";
+}
+
+export function vaultItemTypesMatch(left: VaultItemType, right: VaultItemType) {
+  return left === right || (isDocumentVaultItemType(left) && isDocumentVaultItemType(right));
+}

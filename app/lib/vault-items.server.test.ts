@@ -24,6 +24,11 @@ describe("encrypted vault item input", () => {
     expect(parseEncryptedVaultItemInput(validInput)).toEqual(validInput);
   });
 
+  it("accepts both document items and legacy note items", () => {
+    expect(parseEncryptedVaultItemInput({ ...validInput, type: "document" }).type).toBe("document");
+    expect(parseEncryptedVaultItemInput({ ...validInput, type: "note" }).type).toBe("note");
+  });
+
   it("rejects plaintext or unknown metadata", () => {
     expect(() => parseEncryptedVaultItemInput({
       ...validInput,

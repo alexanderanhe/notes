@@ -7,6 +7,7 @@ import {
   generateSecurePassword,
   getDefaultPayloadForType,
 } from "./vault-items.client";
+import { vaultItemTypesMatch } from "./vault-items";
 
 describe("vault item client encryption", () => {
   it("encrypts and decrypts a password item without plaintext in ciphertext", async () => {
@@ -39,12 +40,43 @@ describe("vault item client encryption", () => {
     });
   });
 
+  it("encrypts a version 2 document without exposing block content", async () => {
+    const masterKey = await generateNoteKey();
+    const payload = {
+      version: 2 as const,
+      blocks: [{ id: "block-1", type: "heading_1" as const, content: "Private heading" }],
+    };
+    const encrypted = await encryptVaultItemPayload("document", payload, masterKey, {
+      title: "Private document",
+    });
+
+    expect(JSON.stringify(encrypted)).not.toContain("Private heading");
+    await expect(decryptVaultItemPayload({
+      ...encrypted,
+      id: "document",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    }, masterKey)).resolves.toMatchObject({ type: "document", payload });
+  });
+
   it("provides defaults for every supported type", () => {
     expect(getDefaultPayloadForType("credit_card")).toMatchObject({
       cardholder: "",
       number: "",
       cvv: "",
     });
+    expect(getDefaultPayloadForType("document")).toMatchObject({
+      version: 2,
+      blocks: [{ type: "paragraph", content: "" }],
+    });
+    expect(getDefaultPayloadForType("note")).toEqual({ markdown: "" });
+  });
+
+  it("treats only legacy notes and documents as the same type", () => {
+    expect(vaultItemTypesMatch("note", "document")).toBe(true);
+    expect(vaultItemTypesMatch("document", "note")).toBe(true);
+    expect(vaultItemTypesMatch("password", "document")).toBe(false);
+    expect(vaultItemTypesMatch("secret", "document")).toBe(false);
   });
 
   it("generates passwords using the selected character groups", () => {

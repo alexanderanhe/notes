@@ -1,4 +1,5 @@
 import { decryptString, encryptString, generateRandomBytes } from "~/lib/crypto.client";
+import { createDocumentBlock } from "~/lib/document-blocks";
 import { normalizeTags } from "~/lib/folders";
 import {
   VAULT_ITEM_ENCRYPTION_VERSION,
@@ -151,6 +152,7 @@ export async function archiveItem(itemId: string, archived: boolean) {
 export function getDefaultPayloadForType(type: VaultItemType): VaultItemPayloadMap[VaultItemType] {
   const defaults: Record<VaultItemType, VaultItemPayloadMap[VaultItemType]> = {
     note: { markdown: "" },
+    document: { version: 2, blocks: [createDocumentBlock()] },
     password: { username: "", password: "", url: "", notes: "" },
     secure_note: { text: "" },
     secret: { name: "", value: "", environment: "development", notes: "" },

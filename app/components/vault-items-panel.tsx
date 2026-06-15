@@ -8,6 +8,7 @@ import {
 import MDEditor from "@uiw/react-md-editor/nohighlight";
 import { toast } from "sonner";
 
+import { DocumentBlockEditor } from "~/components/document-block-editor";
 import { useVault } from "~/contexts/vault-context";
 import { useWorkspace } from "~/contexts/workspace-context";
 import { useFolders } from "~/contexts/folder-context";
@@ -31,10 +32,14 @@ import {
   unlockProtectedNoteKey,
 } from "~/lib/notes.client";
 import type { EncryptedNote, EncryptedNoteSummary } from "~/lib/notes";
+import { documentPayloadToBlocks, getDocumentReferenceIds, isDocumentReferenceBlock, renderBlocks, type DocumentPayload, type DocumentPayloadV2 } from "~/lib/document-blocks";
+import { VaultItemReferenceCard } from "~/components/vault-item-reference-card";
 import { extractTasks, getLocalAICapabilities, suggestTitle, summarizeText, type LocalAICapabilities } from "~/lib/local-ai.client";
 import {
+  isDocumentVaultItemType,
   VAULT_ITEM_LABELS,
   VAULT_ITEM_TYPES,
+  vaultItemTypesMatch,
   type EncryptedVaultItem,
   type VaultItem,
   type VaultItemType,
@@ -67,7 +72,7 @@ const FIELD_LABELS: Record<string, string> = {
 type VaultView = "all" | "favorites" | "recent" | "archive" | "uncategorized";
 type SortMode = "updated-desc" | "updated-asc" | "created-desc" | "title-asc";
 const PRIMARY_TYPES: VaultItemType[] = [
-  "note",
+  "document",
   "password",
   "secret",
   "server",
@@ -76,9 +81,11 @@ const PRIMARY_TYPES: VaultItemType[] = [
   "identity",
   "code_snippet",
 ];
+const DISPLAYED_VAULT_ITEM_TYPES = VAULT_ITEM_TYPES.filter((type) => type !== "note");
 const PRIMARY_TAG_LIMIT = 5;
 const VAULT_ITEM_DESCRIPTIONS: Record<VaultItemType, string> = {
   note: "Información y contenido personal",
+  document: "Información y contenido personal",
   password: "Guarda un inicio de sesión",
   secure_note: "Información privada protegida",
   secret: "Valor confidencial cifrado",
@@ -494,7 +501,7 @@ export function VaultItemsPanel({ email = "" }: { email?: string; onClose?: () =
     if (view === "uncategorized" && (item.archived || item.folderId !== null)) return false;
     if (activeFolderId !== null && item.folderId !== activeFolderId) return false;
     if (activeTag && !item.tags.includes(activeTag)) return false;
-    if (filter !== "all" && item.type !== filter) return false;
+    if (filter !== "all" && !vaultItemTypesMatch(item.type, filter)) return false;
     if (!query.trim()) return true;
     const folderName = folderState.folders.find((folder) => folder.id === item.folderId)?.name ?? "";
     return JSON.stringify([item.title, item.tags, item.payload, folderName])
@@ -520,6 +527,11 @@ export function VaultItemsPanel({ email = "" }: { email?: string; onClose?: () =
   const secondaryTags = tags.slice(PRIMARY_TAG_LIMIT);
   const activeFolder = folderState.folders.find((folder) => folder.id === activeFolderId);
   const breadcrumbs = folderBreadcrumbs(folderState.folders, activeFolderId);
+  const referencedBy = useMemo(() => draft?.id ? items.filter((item) =>
+    item.type === "document"
+    && item.id !== draft.id
+    && getDocumentReferenceIds(item.payload as DocumentPayload).includes(draft.id),
+  ) : [], [draft?.id, items]);
 
   function chooseType(next: VaultItemType | "all") {
     setFilter(next);
@@ -578,9 +590,9 @@ export function VaultItemsPanel({ email = "" }: { email?: string; onClose?: () =
           <VaultNavButton active={view === "uncategorized"} icon={<FiFolder />} label="Uncategorized" count={unifiedItems.filter((item) => !item.archived && item.folderId === null).length} onClick={() => chooseGroup("uncategorized")} />
           <FolderTree folders={folderState.folders} activeFolderId={activeFolderId} counts={Object.fromEntries(folderState.folders.map((folder) => [folder.id, unifiedItems.filter((item) => !item.archived && item.folderId === folder.id).length]))} onSelect={(id) => chooseGroup("all", { folderId: id })} onRename={(folder) => setFolderDialog({ mode: "rename", folder })} onDelete={setDeleteFolder} />
           <SectionTitle label="Types" />
-          {PRIMARY_TYPES.map((type) => <VaultNavButton key={type} active={filter === type} icon={<TypeIcon type={type} />} label={VAULT_ITEM_LABELS[type]} count={unifiedItems.filter((item) => !item.archived && item.type === type).length} onClick={() => chooseGroup("all", { type })} />)}
-          <VaultNavButton active={VAULT_ITEM_TYPES.some((type) => !PRIMARY_TYPES.includes(type) && filter === type)} icon={<FiChevronDown className={moreTypesOpen ? "rotate-180" : ""} />} label="More" onClick={() => setMoreTypesOpen((value) => !value)} />
-          {moreTypesOpen ? <div className="vault-more-types">{VAULT_ITEM_TYPES.filter((type) => !PRIMARY_TYPES.includes(type)).map((type) => <VaultNavButton key={type} active={filter === type} icon={<TypeIcon type={type} />} label={VAULT_ITEM_LABELS[type]} count={unifiedItems.filter((item) => !item.archived && item.type === type).length} onClick={() => chooseGroup("all", { type })} />)}</div> : null}
+          {PRIMARY_TYPES.map((type) => <VaultNavButton key={type} active={filter !== "all" && vaultItemTypesMatch(filter, type)} icon={<TypeIcon type={type} />} label={VAULT_ITEM_LABELS[type]} count={unifiedItems.filter((item) => !item.archived && vaultItemTypesMatch(item.type, type)).length} onClick={() => chooseGroup("all", { type })} />)}
+          <VaultNavButton active={DISPLAYED_VAULT_ITEM_TYPES.some((type) => !PRIMARY_TYPES.includes(type) && filter !== "all" && vaultItemTypesMatch(filter, type))} icon={<FiChevronDown className={moreTypesOpen ? "rotate-180" : ""} />} label="More" onClick={() => setMoreTypesOpen((value) => !value)} />
+          {moreTypesOpen ? <div className="vault-more-types">{DISPLAYED_VAULT_ITEM_TYPES.filter((type) => !PRIMARY_TYPES.includes(type)).map((type) => <VaultNavButton key={type} active={filter !== "all" && vaultItemTypesMatch(filter, type)} icon={<TypeIcon type={type} />} label={VAULT_ITEM_LABELS[type]} count={unifiedItems.filter((item) => !item.archived && vaultItemTypesMatch(item.type, type)).length} onClick={() => chooseGroup("all", { type })} />)}</div> : null}
           {tags.length ? <><SectionTitle label="Tags" />
             {primaryTags.map((tag) => <VaultNavButton key={tag} active={activeTag === tag} icon={<FiHash />} label={tag} count={tagCounts.find(([value]) => value === tag)?.[1] ?? 0} onClick={() => chooseGroup("all", { tag })} />)}
             {secondaryTags.length ? <><VaultNavButton active={secondaryTags.includes(activeTag ?? "")} icon={<FiChevronDown className={moreTagsOpen ? "rotate-180" : ""} />} label="More" onClick={() => setMoreTagsOpen((value) => !value)} />
@@ -606,8 +618,8 @@ export function VaultItemsPanel({ email = "" }: { email?: string; onClose?: () =
       {draft ? <main className={`vault-detail ${detailOpen ? "is-open" : ""}`}>
         <button type="button" onClick={() => setDetailOpen(false)} className="vault-back"><FiArrowLeft /> Back to {activeGroupTitle}</button>
         {editing
-          ? <div className="vault-detail-scroll"><div className="vault-edit-heading"><VaultItemEditIntro type={draft.type} /><button type="button" onClick={() => setEditing(false)} className="vault-secondary-button">Cancel</button></div><VaultItemForm draft={draft} setDraft={setDraft} folders={folderState.folders} working={working} onSave={() => void save().then(() => setEditing(false))} onDelete={selectedId ? confirmDelete : undefined} /></div>
-          : <VaultItemPreview item={draft} folders={breadcrumbs} allFolders={folderState.folders} working={working} onEdit={() => setEditing(true)} onFavorite={() => setDraft({ ...draft, favorite: !draft.favorite })} onFolder={(folderId) => void moveDraftItem(folderId)} onTags={(tags) => void updateDraftTags(tags)} />}
+          ? <div className="vault-detail-scroll"><div className="vault-edit-heading"><VaultItemEditIntro type={draft.type} /><button type="button" onClick={() => setEditing(false)} className="vault-secondary-button">Cancel</button></div><VaultItemForm draft={draft} setDraft={setDraft} items={items} folders={folderState.folders} working={working} onOpenItem={selectItem} onSave={() => void save().then(() => setEditing(false))} onDelete={selectedId ? confirmDelete : undefined} /></div>
+          : <VaultItemPreview item={draft} items={items} referencedBy={referencedBy} folders={breadcrumbs} allFolders={folderState.folders} working={working} onOpenItem={selectItem} onEdit={() => setEditing(true)} onFavorite={() => setDraft({ ...draft, favorite: !draft.favorite })} onFolder={(folderId) => void moveDraftItem(folderId)} onTags={(tags) => void updateDraftTags(tags)} />}
       </main> : null}
       {legacyDraft ? <main className={`vault-detail ${detailOpen ? "is-open" : ""}`}>
         <button type="button" onClick={() => setDetailOpen(false)} className="vault-back"><FiArrowLeft /> Back to {activeGroupTitle}</button>
@@ -639,7 +651,7 @@ export function VaultItemsPanel({ email = "" }: { email?: string; onClose?: () =
 
 function NewItemMenu({ onCreate }: { onCreate: (type: VaultItemType) => void }) {
   return <div className="max-h-72 overflow-y-auto p-1">
-    {VAULT_ITEM_TYPES.map((type) => <button key={type} type="button" onClick={() => onCreate(type)} className="block w-full rounded px-2 py-1.5 text-left text-xs hover:bg-zinc-100 dark:hover:bg-zinc-800">New {VAULT_ITEM_LABELS[type].toLocaleLowerCase()}</button>)}
+    {DISPLAYED_VAULT_ITEM_TYPES.map((type) => <button key={type} type="button" onClick={() => onCreate(type)} className="block w-full rounded px-2 py-1.5 text-left text-xs hover:bg-zinc-100 dark:hover:bg-zinc-800">New {VAULT_ITEM_LABELS[type].toLocaleLowerCase()}</button>)}
   </div>;
 }
 
@@ -745,7 +757,7 @@ function VaultListItem({ item, selected, onSelect }: { item: UnifiedItem; select
         : item.tags.length ? item.tags.map((tag) => `#${tag}`).join("  ") : VAULT_ITEM_LABELS[item.type];
   return <button type="button" onClick={onSelect} className={`vault-list-item ${selected ? "active" : ""}`}>
     <ItemVisual type={item.type} payload={payload} />
-    <span className="min-w-0 flex-1"><span className="flex items-center gap-2"><strong className="truncate">{item.title || "Untitled"}</strong><em>{item.source === "note" ? "Note" : VAULT_ITEM_LABELS[item.type]}</em></span><span className="block truncate text-sm text-slate-400">{item.source === "note" ? "Encrypted note" : subtitle}</span></span>
+    <span className="min-w-0 flex-1"><span className="flex items-center gap-2"><strong className="truncate">{item.title || "Untitled"}</strong><em>{isDocumentVaultItemType(item.type) ? "Document" : VAULT_ITEM_LABELS[item.type]}</em></span><span className="block truncate text-sm text-slate-400">{item.source === "note" ? "Encrypted document" : subtitle}</span></span>
     <span className="shrink-0 text-xs text-slate-400">{formatRelativeDate(item.updatedAt)}</span>
     <FiStar className={item.favorite ? "fill-amber-400 text-amber-400" : "text-slate-400"} />
   </button>;
@@ -787,11 +799,14 @@ function FolderTree({ folders, activeFolderId, counts, onSelect, onRename, onDel
   return <div className="vault-folder-tree">{render(null)}</div>;
 }
 
-function VaultItemPreview({ item, folders, allFolders, working, onEdit, onFavorite, onFolder, onTags }: {
+function VaultItemPreview({ item, items, referencedBy, folders, allFolders, working, onOpenItem, onEdit, onFavorite, onFolder, onTags }: {
   item: VaultItem;
+  items: VaultItem[];
+  referencedBy: VaultItem[];
   folders: Folder[];
   allFolders: Folder[];
   working: boolean;
+  onOpenItem: (item: VaultItem) => void;
   onEdit: () => void;
   onFavorite: () => void;
   onFolder: (folderId: string | null) => void;
@@ -812,13 +827,35 @@ function VaultItemPreview({ item, folders, allFolders, working, onEdit, onFavori
     {tagsOpen ? <div className="vault-preview-quick-edit vault-preview-tags-editor"><TagInput tags={item.tags} onChange={onTags} compact /></div> : null}
     <div className="vault-preview-tabs"><button className="active">Details</button><button>Notes</button><button>History</button><button type="button" className="ml-auto vault-secondary-button" onClick={onEdit}><FiEdit3 /> Edit</button></div>
     <section className="vault-detail-card">
-      {Object.entries(item.payload).map(([field, rawValue]) => {
+      {item.type === "document"
+        ? <DocumentPreviewContent payload={item.payload as DocumentPayload} items={items} onOpenItem={onOpenItem} />
+        : Object.entries(item.payload).map(([field, rawValue]) => {
         const sensitive = SENSITIVE_FIELDS.has(field);
         const value = Array.isArray(rawValue) ? rawValue.map((entry) => typeof entry === "string" ? entry : JSON.stringify(entry)).join("\n") : String(rawValue ?? "");
         return <div className="vault-preview-field" key={field}><div><span>{FIELD_LABELS[field] ?? field}</span><p className={sensitive && !revealed[field] ? "vault-secret" : ""}>{sensitive && !revealed[field] ? "••••••••••••••" : value || "—"}</p></div><div className="flex gap-2">{sensitive ? <button type="button" className="vault-icon-button" onClick={() => setRevealed((current) => ({ ...current, [field]: !current[field] }))}>{revealed[field] ? <FiEyeOff /> : <FiEye />}</button> : null}<button type="button" className="vault-icon-button" onClick={() => void copySensitiveValue(value).then(() => toast.success("Copied; clipboard will clear in 30 seconds"))}><FiCopy /></button></div></div>;
       })}
     </section>
+    {referencedBy.length ? <section className="vault-detail-card vault-backlinks"><h3>Referenced by</h3>{referencedBy.map((documentItem) => <button type="button" key={documentItem.id} onClick={() => onOpenItem(documentItem)}><FiFileText /><span><strong>{documentItem.title || "Untitled"}</strong><small>Document</small></span></button>)}</section> : null}
     <section className="vault-detail-card vault-meta-card"><div><span>Folder</span><p className="vault-folder-value"><FiFolder /> {folders.at(-1)?.name ?? "Uncategorized"}</p></div><div><span>Tags</span><p className="vault-tags">{item.tags.length ? item.tags.map((tag) => <em className="vault-tag-chip" key={tag}># {tag}</em>) : "No tags"}</p></div><div><span>Created</span><p>{formatDateTime(item.createdAt)}</p></div><div><span>Updated</span><p>{formatDateTime(item.updatedAt)}</p></div></section>
+  </div>;
+}
+
+function DocumentPreviewContent({ payload, items, onOpenItem }: { payload: DocumentPayload; items: VaultItem[]; onOpenItem: (item: VaultItem) => void }) {
+  const sourceBlocks = documentPayloadToBlocks(payload);
+  const blocks = renderBlocks(sourceBlocks);
+  return <div className="document-preview-blocks">
+    {blocks.map((block) => {
+      const source = sourceBlocks.find((entry) => entry.id === block.id)!;
+      if (isDocumentReferenceBlock(source)) return <VaultItemReferenceCard key={block.id} type={source.type} itemId={source.itemId} items={items} onOpen={onOpenItem} />;
+      if (block.type === "divider") return <hr key={block.id} />;
+      if (block.type === "checklist") return <label key={block.id}><input type="checkbox" checked={block.checked} readOnly /><span>{block.text}</span></label>;
+      if (block.type === "code") return <pre key={block.id}><code>{block.text}</code></pre>;
+      if (block.type === "quote") return <blockquote key={block.id}>{block.text}</blockquote>;
+      if (block.type === "heading_1") return <h1 key={block.id}>{block.text}</h1>;
+      if (block.type === "heading_2") return <h2 key={block.id}>{block.text}</h2>;
+      if (block.type === "heading_3") return <h3 key={block.id}>{block.text}</h3>;
+      return <p key={block.id}>{block.text || "\u00a0"}</p>;
+    })}
   </div>;
 }
 
@@ -892,7 +929,7 @@ function FilterDialog({ type, folderId, tag, folders, tags, onClose, onApply }: 
   const [nextType, setNextType] = useState(type);
   const [nextFolder, setNextFolder] = useState(folderId);
   const [nextTag, setNextTag] = useState(tag);
-  return <div className="vault-dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="vault-dialog"><header><div><h3>Filter items</h3><p>Combine filters to narrow this group.</p></div><button type="button" className="vault-icon-button" onClick={onClose}><FiX /></button></header><label>Type<select value={nextType} onChange={(event) => setNextType(event.target.value as VaultItemType | "all")}><option value="all">All types</option>{VAULT_ITEM_TYPES.map((value) => <option value={value} key={value}>{VAULT_ITEM_LABELS[value]}</option>)}</select></label><FolderCombobox label="Folder" value={nextFolder} folders={folders} emptyLabel="All folders" onChange={setNextFolder} /><label>Tag<select value={nextTag ?? ""} onChange={(event) => setNextTag(event.target.value || null)}><option value="">All tags</option>{tags.map((value) => <option value={value} key={value}># {value}</option>)}</select></label><footer><button type="button" className="vault-secondary-button" onClick={() => { setNextType("all"); setNextFolder(null); setNextTag(null); }}>Clear</button><button type="button" className="vault-primary-button" onClick={() => onApply({ type: nextType, folderId: nextFolder, tag: nextTag })}>Apply filters</button></footer></section></div>;
+  return <div className="vault-dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="vault-dialog"><header><div><h3>Filter items</h3><p>Combine filters to narrow this group.</p></div><button type="button" className="vault-icon-button" onClick={onClose}><FiX /></button></header><label>Type<select value={nextType === "note" ? "document" : nextType} onChange={(event) => setNextType(event.target.value as VaultItemType | "all")}><option value="all">All types</option>{DISPLAYED_VAULT_ITEM_TYPES.map((value) => <option value={value} key={value}>{VAULT_ITEM_LABELS[value]}</option>)}</select></label><FolderCombobox label="Folder" value={nextFolder} folders={folders} emptyLabel="All folders" onChange={setNextFolder} /><label>Tag<select value={nextTag ?? ""} onChange={(event) => setNextTag(event.target.value || null)}><option value="">All tags</option>{tags.map((value) => <option value={value} key={value}># {value}</option>)}</select></label><footer><button type="button" className="vault-secondary-button" onClick={() => { setNextType("all"); setNextFolder(null); setNextTag(null); }}>Clear</button><button type="button" className="vault-primary-button" onClick={() => onApply({ type: nextType, folderId: nextFolder, tag: nextTag })}>Apply filters</button></footer></section></div>;
 }
 
 function ProtectedNoteDialog({ working, onClose, onUnlock }: { working: boolean; onClose: () => void; onUnlock: (password: string) => void }) {
@@ -1019,11 +1056,13 @@ function FolderDeleteDialog({ folder, onClose, onDelete }: { folder: Folder; onC
   </div>;
 }
 
-function VaultItemForm({ draft, setDraft, folders, working, onSave, onDelete }: {
+function VaultItemForm({ draft, setDraft, items, folders, working, onOpenItem, onSave, onDelete }: {
   draft: VaultItem;
   setDraft: (draft: VaultItem) => void;
+  items: VaultItem[];
   folders: Folder[];
   working: boolean;
+  onOpenItem: (item: VaultItem) => void;
   onSave: () => void;
   onDelete?: () => void;
 }) {
@@ -1083,7 +1122,16 @@ function VaultItemForm({ draft, setDraft, folders, working, onSave, onDelete }: 
       <FolderCombobox label="Folder" value={draft.folderId} folders={folders} onChange={(folderId) => setDraft({ ...draft, folderId })} compact />
       <TagInput tags={draft.tags} onChange={(tags) => setDraft({ ...draft, tags })} compact />
     </section>
-    <div className="grid gap-4 md:grid-cols-2">
+    {draft.type === "document" ? <DocumentBlockEditor
+      key={draft.id || "new-document"}
+      payload={draft.payload as DocumentPayload}
+      items={items}
+      currentDocumentId={draft.id}
+      disabled={working}
+      onOpenItem={onOpenItem}
+      onSave={onSave}
+      onChange={(payload: DocumentPayloadV2) => setDraft({ ...draft, payload })}
+    /> : <div className="grid gap-4 md:grid-cols-2">
       {Object.entries(draft.payload).map(([field, rawValue]) => {
         if (draft.type === "code_snippet" && field === "language") return null;
         const sensitive = SENSITIVE_FIELDS.has(field);
@@ -1131,7 +1179,7 @@ function VaultItemForm({ draft, setDraft, folders, working, onSave, onDelete }: 
           </> : undefined}
         />;
       })}
-    </div>
+    </div>}
     <div className="flex flex-wrap gap-4 text-sm">
       {(["favorite", "pinned", "archived"] as const).map((field) => <label key={field} className="flex items-center gap-2 capitalize"><input type="checkbox" checked={draft[field]} onChange={(event) => setDraft({ ...draft, [field]: event.target.checked })} />{field}</label>)}
     </div>

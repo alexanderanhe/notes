@@ -76,7 +76,9 @@ function serialize(item: WithId<VaultItemDocument>): EncryptedVaultItem {
 }
 
 export async function listEncryptedVaultItems(userId: ObjectId) {
-  return (await (await vaultItemsCollection()).find({ userId }).sort({ pinned: -1, updatedAt: -1 }).toArray()).map(serialize);
+  const collection = await vaultItemsCollection();
+  await migrateNoteItemsToDocuments(collection, userId);
+  return (await collection.find({ userId }).sort({ pinned: -1, updatedAt: -1 }).toArray()).map(serialize);
 }
 
 export async function createEncryptedVaultItem(userId: ObjectId, input: EncryptedVaultItemInput) {
@@ -157,4 +159,12 @@ async function assertOwnedFolder(userId: ObjectId, folderId: string | null) {
     userId,
   });
   if (!folder) throw new Response("Folder not found.", { status: 404 });
+}
+
+async function migrateNoteItemsToDocuments(
+  collection: Collection<VaultItemDocument>,
+  userId: ObjectId,
+) {
+  // `type` is plaintext metadata; keep ciphertext and timestamps byte-for-byte unchanged.
+  await collection.updateMany({ userId, type: "note" }, { $set: { type: "document" } });
 }

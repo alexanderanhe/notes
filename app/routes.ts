@@ -28,6 +28,7 @@ export default [
   route("api/notes/:noteId/folder", "routes/api.notes.$noteId.folder.ts"),
   route("api/vault", "routes/api.vault.ts"),
   route("api/vault-items", "routes/api.vault-items.ts"),
+  route("api/vault-items/copy-authorize", "routes/api.vault-items.copy-authorize.ts"),
   route("api/vault-items/:itemId", "routes/api.vault-items.$itemId.ts"),
   route("api/vault-items/:itemId/folder", "routes/api.vault-items.$itemId.folder.ts"),
   route("api/vault-items/:itemId/favorite", "routes/api.vault-items.$itemId.favorite.ts"),
