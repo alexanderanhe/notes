@@ -1,7 +1,8 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router";
 import {
   FiAlertTriangle, FiArchive, FiArrowLeft, FiBookmark, FiCheckSquare, FiChevronDown, FiChevronLeft, FiChevronRight, FiClock, FiCode,
-  FiCopy, FiCpu, FiCreditCard, FiDatabase, FiEdit3, FiEye, FiEyeOff, FiFileText, FiFilter, FiFolder, FiGlobe, FiGrid, FiHash, FiKey, FiList,
+  FiCopy, FiCpu, FiCreditCard, FiDatabase, FiEdit3, FiExternalLink, FiEye, FiEyeOff, FiFileText, FiFilter, FiFolder, FiGlobe, FiGrid, FiHash, FiKey, FiList,
   FiLock, FiMoreVertical, FiPlus, FiRefreshCw, FiSave, FiSearch,
   FiServer, FiSettings, FiShield, FiStar, FiTrash2, FiUnlock, FiUser, FiWifi, FiX,
 } from "react-icons/fi";
@@ -71,6 +72,7 @@ const FIELD_LABELS: Record<string, string> = {
 
 type VaultView = "all" | "favorites" | "recent" | "archive" | "uncategorized";
 type SortMode = "updated-desc" | "updated-asc" | "created-desc" | "title-asc";
+const VAULT_VIEWS = ["all", "favorites", "recent", "archive", "uncategorized"] as const;
 const PRIMARY_TYPES: VaultItemType[] = [
   "document",
   "password",
@@ -83,6 +85,8 @@ const PRIMARY_TYPES: VaultItemType[] = [
 ];
 const DISPLAYED_VAULT_ITEM_TYPES = VAULT_ITEM_TYPES.filter((type) => type !== "note");
 const PRIMARY_TAG_LIMIT = 5;
+const MIN_LIST_PANE_WIDTH = 280;
+const MAX_LIST_PANE_WIDTH = 720;
 const VAULT_ITEM_DESCRIPTIONS: Record<VaultItemType, string> = {
   note: "Información y contenido personal",
   document: "Información y contenido personal",
@@ -116,10 +120,24 @@ interface LegacyNoteDraft {
 }
 type NoteProtectionAction = "protect" | "change" | "remove";
 
+function parseVaultView(value: string | null): VaultView | null {
+  return VAULT_VIEWS.includes(value as VaultView) ? value as VaultView : null;
+}
+
+function parseTypeFilter(value: string | null): VaultItemType | "all" | null {
+  if (!value || value === "all") return value === "all" ? "all" : null;
+  if (value === "note") return "document";
+  return VAULT_ITEM_TYPES.includes(value as VaultItemType) ? value as VaultItemType : null;
+}
+
 export function VaultItemsPanel({ email = "" }: { email?: string; onClose?: () => void }) {
   const { masterKey } = useVault();
   const workspace = useWorkspace();
   const folderState = useFolders();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialWorkspaceType = parseTypeFilter(workspace.activeTypeFilter);
+  const initialTypeFilter = parseTypeFilter(searchParams.get("type")) ?? initialWorkspaceType ?? "all";
+  const initialView = parseVaultView(searchParams.get("view")) ?? "all";
   const [encryptedItems, setEncryptedItems] = useState<EncryptedVaultItem[]>([]);
   const [items, setItems] = useState<VaultItem[]>([]);
   const [notes, setNotes] = useState<EncryptedNoteSummary[]>([]);
@@ -129,11 +147,12 @@ export function VaultItemsPanel({ email = "" }: { email?: string; onClose?: () =
   const [protectionAction, setProtectionAction] = useState<NoteProtectionAction | null>(null);
   const [localAIOpen, setLocalAIOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [deselectingId, setDeselectingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<VaultItem | null>(null);
-  const [filter, setFilter] = useState<VaultItemType | "all">(workspace.activeTypeFilter as VaultItemType | "all" || "all");
-  const [view, setView] = useState<VaultView>("all");
-  const [activeFolderId, setActiveFolderId] = useState<string | null>(workspace.activeFolderId);
-  const [activeTag, setActiveTag] = useState<string | null>(null);
+  const [filter, setFilter] = useState<VaultItemType | "all">(initialTypeFilter);
+  const [view, setView] = useState<VaultView>(initialView);
+  const [activeFolderId, setActiveFolderId] = useState<string | null>(searchParams.get("folder") ?? workspace.activeFolderId);
+  const [activeTag, setActiveTag] = useState<string | null>(searchParams.get("tag"));
   const [folderDialog, setFolderDialog] = useState<{ mode: "create" | "rename"; folder?: Folder; parentFolderId?: string | null } | null>(null);
   const [deleteFolder, setDeleteFolder] = useState<Folder | null>(null);
   const [query, setQuery] = useState("");
@@ -147,10 +166,23 @@ export function VaultItemsPanel({ email = "" }: { email?: string; onClose?: () =
   const [newItemOpen, setNewItemOpen] = useState(false);
   const [moreTypesOpen, setMoreTypesOpen] = useState(false);
   const [moreTagsOpen, setMoreTagsOpen] = useState(false);
+  const [listPaneWidth, setListPaneWidth] = useState(506);
+  const deselectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     void Promise.all([loadItems(), loadNotes()]);
   }, []);
+
+  useEffect(() => () => {
+    if (deselectTimer.current) clearTimeout(deselectTimer.current);
+  }, []);
+
+  useEffect(() => {
+    setView(parseVaultView(searchParams.get("view")) ?? "all");
+    setFilter(parseTypeFilter(searchParams.get("type")) ?? "all");
+    setActiveFolderId(searchParams.get("folder"));
+    setActiveTag(searchParams.get("tag"));
+  }, [searchParams]);
 
   useEffect(() => {
     if (!masterKey) return;
@@ -188,8 +220,10 @@ export function VaultItemsPanel({ email = "" }: { email?: string; onClose?: () =
   }
 
   function startCreate(type: VaultItemType) {
+    if (deselectTimer.current) clearTimeout(deselectTimer.current);
     setNewItemOpen(false);
     setSelectedId(null);
+    setDeselectingId(null);
     setLegacyDraft(null);
     setDraft({
       id: "",
@@ -209,6 +243,8 @@ export function VaultItemsPanel({ email = "" }: { email?: string; onClose?: () =
   }
 
   function selectItem(item: VaultItem) {
+    if (deselectTimer.current) clearTimeout(deselectTimer.current);
+    setDeselectingId(null);
     setSelectedId(item.id);
     setLegacyDraft(null);
     setDraft(structuredClone(item));
@@ -243,6 +279,8 @@ export function VaultItemsPanel({ email = "" }: { email?: string; onClose?: () =
   async function openLegacyNote(note: EncryptedNote, noteKey?: CryptoKey) {
     if (!masterKey) return;
     const plain = await decryptNote(note, masterKey, noteKey);
+    if (deselectTimer.current) clearTimeout(deselectTimer.current);
+    setDeselectingId(null);
     setSelectedId(note.id);
     setDraft(null);
     setLegacyDraft({
@@ -255,6 +293,22 @@ export function VaultItemsPanel({ email = "" }: { email?: string; onClose?: () =
     workspace.openNote(note.id);
     setEditing(false);
     setDetailOpen(true);
+  }
+
+  function clearSelection() {
+    const id = selectedId;
+    setDetailOpen(false);
+    setEditing(false);
+    setDraft(null);
+    setLegacyDraft(null);
+    setSelectedId(null);
+    if (id) {
+      setDeselectingId(id);
+      if (legacyDraft) workspace.setActiveNote(null);
+      else workspace.setActiveItem(null);
+      if (deselectTimer.current) clearTimeout(deselectTimer.current);
+      deselectTimer.current = setTimeout(() => setDeselectingId(null), 360);
+    }
   }
 
   async function unlockLegacyNote(password: string) {
@@ -532,6 +586,7 @@ export function VaultItemsPanel({ email = "" }: { email?: string; onClose?: () =
     && item.id !== draft.id
     && getDocumentReferenceIds(item.payload as DocumentPayload).includes(draft.id),
   ) : [], [draft?.id, items]);
+  const hasCreateContext = filter !== "all" || activeFolderId !== null || activeTag !== null;
 
   function chooseType(next: VaultItemType | "all") {
     setFilter(next);
@@ -541,6 +596,19 @@ export function VaultItemsPanel({ email = "" }: { email?: string; onClose?: () =
   function chooseFolder(folderId: string | null) {
     setActiveFolderId(folderId);
     workspace.setOrganizationState({ activeFolderId: folderId });
+  }
+
+  function writeFiltersToUrl(next: { view: VaultView; type: VaultItemType | "all"; folderId: string | null; tag: string | null }) {
+    const params = new URLSearchParams(searchParams);
+    if (next.view === "all") params.delete("view");
+    else params.set("view", next.view);
+    if (next.type === "all" || next.type === "note") params.delete("type");
+    else params.set("type", next.type);
+    if (next.folderId) params.set("folder", next.folderId);
+    else params.delete("folder");
+    if (next.tag) params.set("tag", next.tag);
+    else params.delete("tag");
+    setSearchParams(params, { replace: false });
   }
 
   const activeGroupTitle = activeTag
@@ -553,18 +621,46 @@ export function VaultItemsPanel({ email = "" }: { email?: string; onClose?: () =
         archive: "Archive",
         uncategorized: "Uncategorized",
       }[view]);
+  const contextualCreateType: VaultItemType = filter !== "all" && filter !== "note" ? filter : "document";
+  const contextualCreateLabel = filter !== "all" && filter !== "note"
+    ? `New ${VAULT_ITEM_LABELS[filter].toLocaleLowerCase()}`
+    : activeFolder
+      ? `New document in ${activeFolder.name}`
+      : "New document";
 
   const chooseGroup = (nextView: VaultView, options?: { folderId?: string | null; tag?: string | null; type?: VaultItemType | "all" }) => {
+    const nextFolderId = options?.folderId ?? null;
+    const nextTag = options?.tag ?? null;
+    const nextType = options?.type ?? "all";
     setView(nextView);
-    chooseFolder(options?.folderId ?? null);
-    setActiveTag(options?.tag ?? null);
-    chooseType(options?.type ?? "all");
+    chooseFolder(nextFolderId);
+    setActiveTag(nextTag);
+    chooseType(nextType);
+    writeFiltersToUrl({ view: nextView, folderId: nextFolderId, tag: nextTag, type: nextType });
     setSidebarOpen(false);
     setDetailOpen(false);
   };
 
+  const startPaneResize = (event: React.PointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    const sidebarWidth = workspace.sidebarCollapsed
+      ? 0
+      : document.querySelector(".vault-sidebar")?.getBoundingClientRect().width ?? 286;
+    const move = (moveEvent: PointerEvent) => {
+      setListPaneWidth(Math.min(MAX_LIST_PANE_WIDTH, Math.max(MIN_LIST_PANE_WIDTH, moveEvent.clientX - sidebarWidth)));
+    };
+    const stop = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+      document.body.classList.remove("is-resizing-vault-pane");
+    };
+    document.body.classList.add("is-resizing-vault-pane");
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop, { once: true });
+  };
+
   return (
-    <div className={`vault-shell ${workspace.sidebarCollapsed ? "sidebar-collapsed" : ""} ${detailOpen ? "detail-open" : ""}`}>
+    <div className={`vault-shell ${workspace.sidebarCollapsed ? "sidebar-collapsed" : ""} ${detailOpen ? "detail-open" : ""}`} style={{ "--vault-list-width": `${listPaneWidth}px` } as React.CSSProperties}>
       <header className="vault-topbar">
         <button type="button" className="vault-topbar-brand" onClick={() => setSidebarOpen(true)} aria-label="Open navigation"><img src="/icon.svg" alt="" /><strong>Notes</strong></button>
         <label className="vault-search"><FiSearch /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search vault..." /><kbd>⌘ K</kbd></label>
@@ -605,28 +701,30 @@ export function VaultItemsPanel({ email = "" }: { email?: string; onClose?: () =
         <div className="vault-list-header">
           <div><h1>{activeGroupTitle}</h1><p>{filtered.length} items</p></div>
           <div className="ml-auto flex gap-2">
+            {hasCreateContext ? <button type="button" className="vault-context-create-button" onClick={() => startCreate(contextualCreateType)} title={contextualCreateLabel} aria-label={contextualCreateLabel}><FiPlus /></button> : null}
             <button type="button" className="vault-icon-button" onClick={() => setFilterDialogOpen(true)}><FiFilter /></button>
             <select value={sortMode} onChange={(event) => setSortMode(event.target.value as SortMode)} className="vault-select"><option value="updated-desc">Updated</option><option value="updated-asc">Oldest updated</option><option value="created-desc">Created</option><option value="title-asc">Title</option></select>
             <div className="vault-segment"><button type="button" className={displayMode === "list" ? "active" : ""} onClick={() => setDisplayMode("list")}><FiList /></button><button type="button" className={displayMode === "grid" ? "active" : ""} onClick={() => setDisplayMode("grid")}><FiGrid /></button></div>
           </div>
         </div>
         <div className={displayMode === "grid" ? "vault-item-grid" : "vault-item-list"}>
-          {filtered.map((item) => <VaultListItem key={`${item.source}-${item.id}`} item={item} selected={selectedId === item.id} onSelect={() => item.source === "note" ? void selectLegacyNote(item) : selectItem(item)} />)}
-          {!filtered.length ? <div className="vault-empty">No items in this group.</div> : null}
+          {filtered.map((item) => <VaultListItem key={`${item.source}-${item.id}`} item={item} selected={selectedId === item.id} deselecting={deselectingId === item.id} onSelect={() => item.source === "note" ? void selectLegacyNote(item) : selectItem(item)} />)}
+          {!filtered.length ? <div className="vault-empty"><p>No items in this group.</p>{hasCreateContext ? <button type="button" className="vault-primary-button" onClick={() => startCreate(contextualCreateType)}><FiPlus /> {contextualCreateLabel}</button> : null}</div> : null}
         </div>
       </section>
+      <button type="button" className="vault-pane-resizer" aria-label="Resize item list" onPointerDown={startPaneResize} />
       {draft ? <main className={`vault-detail ${detailOpen ? "is-open" : ""}`}>
-        <button type="button" onClick={() => setDetailOpen(false)} className="vault-back"><FiArrowLeft /> Back to {activeGroupTitle}</button>
+        <button type="button" onClick={clearSelection} className="vault-back"><FiArrowLeft /> Back to {activeGroupTitle}</button>
         {editing
           ? <div className="vault-detail-scroll"><div className="vault-edit-heading"><VaultItemEditIntro type={draft.type} /><button type="button" onClick={() => setEditing(false)} className="vault-secondary-button">Cancel</button></div><VaultItemForm draft={draft} setDraft={setDraft} items={items} folders={folderState.folders} working={working} onOpenItem={selectItem} onSave={() => void save().then(() => setEditing(false))} onDelete={selectedId ? confirmDelete : undefined} /></div>
           : <VaultItemPreview item={draft} items={items} referencedBy={referencedBy} folders={breadcrumbs} allFolders={folderState.folders} working={working} onOpenItem={selectItem} onEdit={() => setEditing(true)} onFavorite={() => setDraft({ ...draft, favorite: !draft.favorite })} onFolder={(folderId) => void moveDraftItem(folderId)} onTags={(tags) => void updateDraftTags(tags)} />}
       </main> : null}
       {legacyDraft ? <main className={`vault-detail ${detailOpen ? "is-open" : ""}`}>
-        <button type="button" onClick={() => setDetailOpen(false)} className="vault-back"><FiArrowLeft /> Back to {activeGroupTitle}</button>
+        <button type="button" onClick={clearSelection} className="vault-back"><FiArrowLeft /> Back to {activeGroupTitle}</button>
         <LegacyNoteDetail note={legacyDraft} editing={editing} working={working} folders={folderState.folders} onEdit={() => setEditing(true)} onCancel={() => setEditing(false)} onChange={setLegacyDraft} onSave={() => void saveLegacyNote()} onPin={() => void updateLegacyMetadata({ pinned: !legacyDraft.pinned })} onArchive={() => void updateLegacyMetadata({ archived: !legacyDraft.archived })} onFolder={(folderId) => void moveLegacyNote(folderId)} onCritical={() => void setLegacyCritical(!legacyDraft.encrypted.isCritical)} onProtection={setProtectionAction} onDelete={confirmDeleteLegacyNote} onLocalAI={() => setLocalAIOpen(true)} />
       </main> : null}
       <button type="button" title={workspace.sidebarCollapsed ? "Show sidebar" : "Hide sidebar"} aria-label={workspace.sidebarCollapsed ? "Show sidebar" : "Hide sidebar"} onClick={() => workspace.setSidebarCollapsed(!workspace.sidebarCollapsed)} className="vault-sidebar-toggle">{workspace.sidebarCollapsed ? <FiChevronRight /> : <FiChevronLeft />}</button>
-      {filterDialogOpen ? <FilterDialog type={filter} folderId={activeFolderId} tag={activeTag} folders={folderState.folders} tags={tags} onClose={() => setFilterDialogOpen(false)} onApply={(next) => { setFilter(next.type); setActiveFolderId(next.folderId); setActiveTag(next.tag); setFilterDialogOpen(false); }} /> : null}
+      {filterDialogOpen ? <FilterDialog type={filter} folderId={activeFolderId} tag={activeTag} folders={folderState.folders} tags={tags} onClose={() => setFilterDialogOpen(false)} onApply={(next) => { setFilter(next.type); setActiveFolderId(next.folderId); setActiveTag(next.tag); workspace.setOrganizationState({ activeTypeFilter: next.type, activeFolderId: next.folderId }); writeFiltersToUrl({ view, type: next.type, folderId: next.folderId, tag: next.tag }); setFilterDialogOpen(false); }} /> : null}
       {protectedNote ? <ProtectedNoteDialog working={working} onClose={() => setProtectedNote(null)} onUnlock={(password) => void unlockLegacyNote(password)} /> : null}
       {protectionAction ? <NoteProtectionDialog mode={protectionAction} working={working} onClose={() => setProtectionAction(null)} onSubmit={(currentPassword, newPassword) => void handleProtectionAction(currentPassword, newPassword)} /> : null}
       {localAIOpen && legacyDraft ? <LocalAINoteDialog note={legacyDraft} onClose={() => setLocalAIOpen(false)} onChange={(changes) => { const next = { ...legacyDraft, ...changes }; setLegacyDraft(next); void saveLegacyNote(next); }} /> : null}
@@ -714,6 +812,17 @@ function getFaviconUrls(value: string) {
   }
 }
 
+function normalizeExternalUrl(value: string) {
+  const candidate = value.trim();
+  if (!candidate) return null;
+  try {
+    const url = new URL(candidate.includes("://") ? candidate : `https://${candidate}`);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
 function getDominantFaviconColor(image: HTMLImageElement) {
   try {
     const canvas = document.createElement("canvas");
@@ -746,7 +855,7 @@ function getDominantFaviconColor(image: HTMLImageElement) {
   }
 }
 
-function VaultListItem({ item, selected, onSelect }: { item: UnifiedItem; selected: boolean; onSelect: () => void }) {
+function VaultListItem({ item, selected, deselecting, onSelect }: { item: UnifiedItem; selected: boolean; deselecting: boolean; onSelect: () => void }) {
   const payload = item.payload as Record<string, unknown>;
   const subtitle = item.type === "password"
     ? String(payload.username || payload.url || "Password")
@@ -755,7 +864,7 @@ function VaultListItem({ item, selected, onSelect }: { item: UnifiedItem; select
       : item.type === "database"
         ? String(payload.host || payload.database || "Database")
         : item.tags.length ? item.tags.map((tag) => `#${tag}`).join("  ") : VAULT_ITEM_LABELS[item.type];
-  return <button type="button" onClick={onSelect} className={`vault-list-item ${selected ? "active" : ""}`}>
+  return <button type="button" onClick={onSelect} className={`vault-list-item ${selected ? "active" : ""} ${deselecting ? "deselecting" : ""}`}>
     <ItemVisual type={item.type} payload={payload} />
     <span className="min-w-0 flex-1"><span className="flex items-center gap-2"><strong className="truncate">{item.title || "Untitled"}</strong><em>{isDocumentVaultItemType(item.type) ? "Document" : VAULT_ITEM_LABELS[item.type]}</em></span><span className="block truncate text-sm text-slate-400">{item.source === "note" ? "Encrypted document" : subtitle}</span></span>
     <span className="shrink-0 text-xs text-slate-400">{formatRelativeDate(item.updatedAt)}</span>
@@ -832,7 +941,8 @@ function VaultItemPreview({ item, items, referencedBy, folders, allFolders, work
         : Object.entries(item.payload).map(([field, rawValue]) => {
         const sensitive = SENSITIVE_FIELDS.has(field);
         const value = Array.isArray(rawValue) ? rawValue.map((entry) => typeof entry === "string" ? entry : JSON.stringify(entry)).join("\n") : String(rawValue ?? "");
-        return <div className="vault-preview-field" key={field}><div><span>{FIELD_LABELS[field] ?? field}</span><p className={sensitive && !revealed[field] ? "vault-secret" : ""}>{sensitive && !revealed[field] ? "••••••••••••••" : value || "—"}</p></div><div className="flex gap-2">{sensitive ? <button type="button" className="vault-icon-button" onClick={() => setRevealed((current) => ({ ...current, [field]: !current[field] }))}>{revealed[field] ? <FiEyeOff /> : <FiEye />}</button> : null}<button type="button" className="vault-icon-button" onClick={() => void copySensitiveValue(value).then(() => toast.success("Copied; clipboard will clear in 30 seconds"))}><FiCopy /></button></div></div>;
+        const externalUrl = item.type === "bookmark" && field === "url" ? normalizeExternalUrl(value) : null;
+        return <div className="vault-preview-field" key={field}><div><span>{FIELD_LABELS[field] ?? field}</span><p className={sensitive && !revealed[field] ? "vault-secret" : ""}>{sensitive && !revealed[field] ? "••••••••••••••" : value || "—"}</p></div><div className="flex gap-2">{sensitive ? <button type="button" className="vault-icon-button" onClick={() => setRevealed((current) => ({ ...current, [field]: !current[field] }))}>{revealed[field] ? <FiEyeOff /> : <FiEye />}</button> : null}{externalUrl ? <a className="vault-icon-button" href={externalUrl} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer" title="Open bookmark" aria-label="Open bookmark in a new tab"><FiExternalLink /></a> : null}<button type="button" className="vault-icon-button" onClick={() => void copySensitiveValue(value).then(() => toast.success("Copied; clipboard will clear in 30 seconds"))}><FiCopy /></button></div></div>;
       })}
     </section>
     {referencedBy.length ? <section className="vault-detail-card vault-backlinks"><h3>Referenced by</h3>{referencedBy.map((documentItem) => <button type="button" key={documentItem.id} onClick={() => onOpenItem(documentItem)}><FiFileText /><span><strong>{documentItem.title || "Untitled"}</strong><small>Document</small></span></button>)}</section> : null}

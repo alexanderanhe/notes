@@ -53,8 +53,10 @@ export function DocumentBlockEditor({ payload, items, currentDocumentId, onChang
   const [markdownMode, setMarkdownMode] = useState(false);
   const [markdown, setMarkdown] = useState(() => blocksToMarkdown(blocks));
   const [menu, setMenu] = useState<{ blockId: string; mode: "insert" | "slash" } | null>(null);
+  const [menuIndex, setMenuIndex] = useState(0);
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [focusId, setFocusId] = useState<string | null>(null);
+  const [focusedBlockId, setFocusedBlockId] = useState<string | null>(null);
   const [referencePicker, setReferencePicker] = useState<{ blockId: string; type: DocumentReferenceBlockType; mode: "insert" | "slash" } | null>(null);
   const [referenceQuery, setReferenceQuery] = useState("");
   const inputs = useRef(new Map<string, HTMLInputElement | HTMLTextAreaElement>());
@@ -69,6 +71,8 @@ export function DocumentBlockEditor({ payload, items, currentDocumentId, onChang
   const referenceOptions = REFERENCE_OPTIONS.filter((option) =>
     !slashQuery || `${option.label} reference`.toLocaleLowerCase().includes(slashQuery),
   );
+  const menuItemCount = options.length + referenceOptions.length;
+  const activeMenuIndex = Math.min(menuIndex, Math.max(menuItemCount - 1, 0));
 
   const commit = (next: DocumentBlock[]) => {
     const normalized = next.length ? next : [createDocumentBlock()];
@@ -95,8 +99,21 @@ export function DocumentBlockEditor({ payload, items, currentDocumentId, onChang
     focus(block.id);
   };
 
+  const insertParagraphWithMenu = (afterId: string) => {
+    const index = blocks.findIndex((block) => block.id === afterId);
+    const block = createDocumentBlock("paragraph");
+    commit([...blocks.slice(0, index + 1), block, ...blocks.slice(index + 1)]);
+    setMenu({ blockId: block.id, mode: "slash" });
+    setMenuIndex(0);
+    focus(block.id);
+  };
+
   const replaceType = (id: string, type: DocumentContentBlock["type"]) => {
-    const next = blocks.map((block) => block.id === id ? { ...createDocumentBlock(type), id } : block);
+    const index = blocks.findIndex((block) => block.id === id);
+    const replacement = { ...createDocumentBlock(type), id };
+    const needsTrailingParagraph = !blocks[index + 1] || isDocumentReferenceBlock(blocks[index + 1]!);
+    const next = blocks.map((block) => block.id === id ? replacement : block);
+    if (needsTrailingParagraph) next.splice(index + 1, 0, createDocumentBlock("paragraph"));
     commit(next);
     setMenu(null);
     focus(id);
@@ -112,7 +129,12 @@ export function DocumentBlockEditor({ payload, items, currentDocumentId, onChang
         }
       : block);
     commit(next);
-    setMenu(text.startsWith("/") && !text.includes("\n") ? { blockId: id, mode: "slash" } : null);
+    if (text.startsWith("/") && !text.includes("\n")) {
+      setMenu({ blockId: id, mode: "slash" });
+      setMenuIndex(0);
+    } else {
+      setMenu(null);
+    }
   };
 
   const toggleChecklist = (id: string) => commit(blocks.map((block) => block.id === id && block.type === "checklist"
@@ -133,6 +155,22 @@ export function DocumentBlockEditor({ payload, items, currentDocumentId, onChang
     }
     if (event.key === "Escape") {
       setMenu(null);
+      return;
+    }
+    if (menu?.blockId === block.id && menuItemCount > 0 && ["ArrowDown", "ArrowUp", "Enter"].includes(event.key)) {
+      event.preventDefault();
+      if (event.key === "ArrowDown") {
+        setMenuIndex((index) => (index + 1) % menuItemCount);
+        return;
+      }
+      if (event.key === "ArrowUp") {
+        setMenuIndex((index) => (index - 1 + menuItemCount) % menuItemCount);
+        return;
+      }
+      const blockOption = options[activeMenuIndex];
+      const referenceOption = referenceOptions[activeMenuIndex - options.length];
+      if (blockOption) replaceType(block.id, blockOption.type);
+      else if (referenceOption) chooseReferenceType(block.id, referenceOption.type, menu.mode);
       return;
     }
     if (event.key === "Enter" && !event.shiftKey) {
@@ -214,8 +252,8 @@ export function DocumentBlockEditor({ payload, items, currentDocumentId, onChang
     const reference = createDocumentReferenceBlock(referencePicker.type, item.id);
     const index = blocks.findIndex((block) => block.id === referencePicker.blockId);
     commit(referencePicker.mode === "slash"
-      ? [...blocks.slice(0, index), reference, ...blocks.slice(index + 1)]
-      : [...blocks.slice(0, index + 1), reference, ...blocks.slice(index + 1)]);
+      ? [...blocks.slice(0, index), reference, createDocumentBlock("paragraph"), ...blocks.slice(index + 1)]
+      : [...blocks.slice(0, index + 1), reference, createDocumentBlock("paragraph"), ...blocks.slice(index + 1)]);
     setReferencePicker(null);
   };
 
@@ -262,7 +300,7 @@ export function DocumentBlockEditor({ payload, items, currentDocumentId, onChang
           onDrop={() => drop(block.id)}
         >
           <div className="document-block-controls">
-            <button type="button" aria-label="Insert block below" onClick={() => setMenu({ blockId: block.id, mode: "insert" })}><FiPlus /></button>
+            <button type="button" aria-label="Insert block below" onClick={() => insertParagraphWithMenu(block.id)}><FiPlus /></button>
             <button type="button" draggable aria-label="Drag to reorder block" onDragStart={(event) => { event.dataTransfer.setData("text/plain", block.id); event.dataTransfer.effectAllowed = "move"; setDraggedId(block.id); }} onDragEnd={() => setDraggedId(null)}><span>⋮⋮</span></button>
           </div>
           <div className="document-block-content">
@@ -271,13 +309,15 @@ export function DocumentBlockEditor({ payload, items, currentDocumentId, onChang
               : block.type === "divider" ? <hr /> : <>
               {block.type === "checklist" ? <input type="checkbox" checked={view.checked} onChange={() => toggleChecklist(block.id)} /> : null}
               {block.type === "code"
-                ? <textarea ref={(element) => { if (element) inputs.current.set(block.id, element); else inputs.current.delete(block.id); }} rows={Math.max(2, view.text.split("\n").length)} value={view.text} onPaste={(event) => paste(event, block.id)} onKeyDown={(event) => onKeyDown(event, block)} onChange={(event) => updateText(block.id, event.target.value)} placeholder="Write code..." />
-                : <input ref={(element) => { if (element) inputs.current.set(block.id, element); else inputs.current.delete(block.id); }} value={view.text} onPaste={(event) => paste(event, block.id)} onKeyDown={(event) => onKeyDown(event, block)} onChange={(event) => updateText(block.id, event.target.value)} placeholder={block.type.startsWith("heading") ? "Heading" : block.type === "quote" ? "Quote" : block.type === "checklist" ? "To-do" : "Type '/' for commands"} />}
+                ? <textarea ref={(element) => { if (element) inputs.current.set(block.id, element); else inputs.current.delete(block.id); }} rows={Math.max(2, view.text.split("\n").length)} value={view.text} onFocus={() => setFocusedBlockId(block.id)} onBlur={() => setFocusedBlockId((id) => id === block.id ? null : id)} onPaste={(event) => paste(event, block.id)} onKeyDown={(event) => onKeyDown(event, block)} onChange={(event) => updateText(block.id, event.target.value)} placeholder={focusedBlockId === block.id ? "Write code..." : ""} />
+                : <input ref={(element) => { if (element) inputs.current.set(block.id, element); else inputs.current.delete(block.id); }} value={view.text} onFocus={() => setFocusedBlockId(block.id)} onBlur={() => setFocusedBlockId((id) => id === block.id ? null : id)} onPaste={(event) => paste(event, block.id)} onKeyDown={(event) => onKeyDown(event, block)} onChange={(event) => updateText(block.id, event.target.value)} placeholder={focusedBlockId === block.id ? block.type.startsWith("heading") ? "Heading" : block.type === "quote" ? "Quote" : block.type === "checklist" ? "To-do" : "Type '/' for commands" : ""} />}
             </>}
           </div>
           {menuOpen ? <BlockMenu
             options={options}
             referenceOptions={referenceOptions}
+            activeIndex={activeMenuIndex}
+            onActiveIndex={setMenuIndex}
             onSelect={(type) => menu.mode === "slash" ? replaceType(block.id, type) : insert(block.id, type)}
             onReference={(type) => chooseReferenceType(block.id, type, menu.mode)}
           /> : null}
@@ -295,21 +335,26 @@ export function DocumentBlockEditor({ payload, items, currentDocumentId, onChang
   </section>;
 }
 
-function BlockMenu({ options, referenceOptions, onSelect, onReference }: {
+function BlockMenu({ options, referenceOptions, activeIndex, onActiveIndex, onSelect, onReference }: {
   options: typeof BLOCK_OPTIONS;
   referenceOptions: typeof REFERENCE_OPTIONS;
+  activeIndex: number;
+  onActiveIndex: (index: number) => void;
   onSelect: (type: DocumentContentBlock["type"]) => void;
   onReference: (type: DocumentReferenceBlockType) => void;
 }) {
   return <div className="document-block-menu">
     <p>Basic blocks</p>
-    {options.map((option) => <button type="button" key={option.type} onMouseDown={(event) => event.preventDefault()} onClick={() => onSelect(option.type)}>
+    {options.map((option, index) => <button type="button" key={option.type} className={activeIndex === index ? "active" : ""} onMouseEnter={() => onActiveIndex(index)} onMouseDown={(event) => event.preventDefault()} onClick={() => onSelect(option.type)}>
       <span>{option.icon}</span><span><strong>{option.label}</strong><small>{option.hint}</small></span>
     </button>)}
     {referenceOptions.length ? <p>References</p> : null}
-    {referenceOptions.map((option) => <button type="button" key={option.type} onMouseDown={(event) => event.preventDefault()} onClick={() => onReference(option.type)}>
+    {referenceOptions.map((option, index) => {
+      const optionIndex = options.length + index;
+      return <button type="button" key={option.type} className={activeIndex === optionIndex ? "active" : ""} onMouseEnter={() => onActiveIndex(optionIndex)} onMouseDown={(event) => event.preventDefault()} onClick={() => onReference(option.type)}>
       <span>{option.icon}</span><span><strong>{option.label}</strong><small>Reference current vault item</small></span>
-    </button>)}
+    </button>;
+    })}
     {!options.length && !referenceOptions.length ? <em>No matching blocks</em> : null}
   </div>;
 }
