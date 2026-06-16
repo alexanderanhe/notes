@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   getLocalAICapabilities,
+  getAIContextForVaultItem,
   LocalAIUnavailableError,
   summarizeText,
 } from "./local-ai.client";
@@ -72,5 +73,35 @@ describe("local AI client", () => {
     await expect(summarizeText("Private note")).rejects.toBeInstanceOf(
       LocalAIUnavailableError,
     );
+  });
+
+  it("builds safe vault item AI context without password secrets", () => {
+    const context = getAIContextForVaultItem({
+      id: "item",
+      type: "password",
+      folderId: null,
+      title: "Production login",
+      payload: {
+        username: "deploy-user",
+        password: "super-secret-password",
+        url: "https://admin.example.com",
+        notes: "Use during maintenance",
+        totpSecret: "TOTP-SECRET",
+      },
+      itemNotes: { version: 1, markdown: "Coordinate with SRE", updatedAt: "2026-01-01T00:00:00.000Z" },
+      tags: [],
+      favorite: false,
+      archived: false,
+      pinned: false,
+      requiresRecent2FA: false,
+      hasExtraPassword: false,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    expect(context).toContain("deploy-user");
+    expect(context).toContain("Coordinate with SRE");
+    expect(context).not.toContain("super-secret-password");
+    expect(context).not.toContain("TOTP-SECRET");
   });
 });

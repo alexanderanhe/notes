@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseEncryptedTagsInput, parseEncryptedVaultItemInput } from "./vault-items.server";
+import { parseEncryptedItemNotesInput, parseEncryptedTagsInput, parseEncryptedVaultItemInput } from "./vault-items.server";
 
 const validInput = {
   type: "password",
@@ -16,6 +16,8 @@ const validInput = {
   favorite: false,
   archived: false,
   pinned: false,
+  requiresRecent2FA: false,
+  hasExtraPassword: false,
   encryptionVersion: 1,
 } as const;
 
@@ -36,6 +38,21 @@ describe("encrypted vault item input", () => {
     })).toThrow();
   });
 
+  it("requires complete extra password metadata", () => {
+    expect(() => parseEncryptedVaultItemInput({
+      ...validInput,
+      hasExtraPassword: true,
+      extraPasswordSalt: Buffer.alloc(16).toString("base64"),
+    })).toThrow();
+    expect(parseEncryptedVaultItemInput({
+      ...validInput,
+      hasExtraPassword: true,
+      extraPasswordSalt: Buffer.alloc(16).toString("base64"),
+      extraPasswordEncryptedItemKey: Buffer.alloc(48).toString("base64"),
+      extraPasswordItemKeyIv: Buffer.alloc(12).toString("base64"),
+    }).hasExtraPassword).toBe(true);
+  });
+
   it("accepts only encrypted tag updates", () => {
     const encryptedTags = {
       tagsEncrypted: validInput.tagsEncrypted,
@@ -45,5 +62,14 @@ describe("encrypted vault item input", () => {
     };
     expect(parseEncryptedTagsInput(encryptedTags)).toEqual(encryptedTags);
     expect(() => parseEncryptedTagsInput({ ...encryptedTags, tags: ["plaintext"] })).toThrow();
+  });
+
+  it("accepts only encrypted item notes", () => {
+    const encryptedNotes = {
+      encryptedItemNotes: Buffer.alloc(64).toString("base64"),
+      itemNotesIv: Buffer.alloc(12).toString("base64"),
+    };
+    expect(parseEncryptedItemNotesInput(encryptedNotes)).toEqual(encryptedNotes);
+    expect(() => parseEncryptedItemNotesInput({ ...encryptedNotes, markdown: "plaintext" })).toThrow();
   });
 });

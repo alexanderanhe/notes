@@ -1,3 +1,6 @@
+import { documentPayloadToBlocks, renderBlocks, type DocumentPayload } from "~/lib/document-blocks";
+import type { VaultItem } from "~/lib/vault-items";
+
 export type LocalAIAvailability =
   | "available"
   | "downloadable"
@@ -26,6 +29,11 @@ export interface SummarizeOptions extends LocalAIOptions {
 export interface DetectedLanguage {
   detectedLanguage: string;
   confidence: number;
+}
+
+export interface VaultItemAIContextOptions {
+  includeSecretValues?: boolean;
+  includeConnectionStrings?: boolean;
 }
 
 interface BuiltInAIFactory {
@@ -145,6 +153,69 @@ export async function extractTasks(text: string, options: LocalAIOptions = {}) {
     `Extract actionable tasks from the following private note. Return a Markdown checklist only. If there are no tasks, return "No actionable tasks found."\n\n${text}`,
     options,
   );
+}
+
+export function getAIContextForVaultItem(
+  item: VaultItem,
+  payload = item.payload,
+  options: VaultItemAIContextOptions = {},
+) {
+  const notes = item.itemNotes?.markdown ? `Item notes:\n${item.itemNotes.markdown}` : "";
+  const parts = [`Title: ${item.title}`];
+  const data = payload as Record<string, unknown>;
+  const add = (label: string, value: unknown) => {
+    if (value === undefined || value === null || value === "") return;
+    parts.push(`${label}: ${Array.isArray(value) ? value.join("\n") : String(value)}`);
+  };
+
+  if (item.type === "credit_card" || item.type === "identity" || item.type === "recovery_codes") return null;
+  if (item.type === "document" || item.type === "note") {
+    parts.push(renderBlocks(documentPayloadToBlocks(payload as DocumentPayload)).map((block) => "text" in block ? block.text : "").join("\n"));
+  } else if (item.type === "password") {
+    add("URL", data.url);
+    add("Username", data.username);
+    add("Notes", data.notes);
+  } else if (item.type === "secret") {
+    add("Name", data.name);
+    add("Environment", data.environment);
+    add("Notes", data.notes);
+    if (options.includeSecretValues) add("Secret value", data.value);
+  } else if (item.type === "server") {
+    add("Host", data.host);
+    add("IP", data.ip);
+    add("Username", data.username);
+    add("Notes", data.notes);
+  } else if (item.type === "database") {
+    add("Engine", data.engine);
+    add("Host", data.host);
+    add("Database", data.database);
+    add("Username", data.username);
+    add("Notes", data.notes);
+    if (options.includeConnectionStrings) add("Connection string", data.connectionString);
+  } else if (item.type === "bookmark") {
+    add("URL", data.url);
+    add("Description", data.description);
+    add("Notes", data.notes);
+  } else if (item.type === "code_snippet") {
+    add("Language", data.language);
+    add("Description", data.description);
+    add("Code", data.code);
+    add("Notes", data.notes);
+  } else if (item.type === "wifi") {
+    add("SSID", data.ssid);
+    add("Security", data.security);
+    add("Location", data.location);
+    add("Notes", data.notes);
+  } else {
+    add("Notes", data.notes);
+    add("Description", data.description);
+    add("Text", data.text);
+    add("Markdown", data.markdown);
+  }
+
+  if (notes) parts.push(notes);
+  const text = parts.join("\n\n").trim();
+  return text.length ? text : null;
 }
 
 export async function rewriteText(

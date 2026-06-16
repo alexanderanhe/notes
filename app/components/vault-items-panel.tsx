@@ -15,12 +15,23 @@ import { useWorkspace } from "~/contexts/workspace-context";
 import { useFolders } from "~/contexts/folder-context";
 import {
   copySensitiveValue,
+  archiveItem,
+  authorizeSensitiveVaultAction,
   createVaultItem,
+  changeVaultItemExtraPassword,
   decryptVaultItemPayload,
   generateSecurePassword,
   getDefaultPayloadForType,
   moveItemToFolder,
+  protectVaultItem,
+  pinItem,
+  removeVaultItemExtraPassword,
+  requireRecent2FAForItem,
+  toggleFavorite,
+  unlockProtectedVaultItemKey,
+  listVaultItemEvents,
   updateVaultItem,
+  updateVaultItemNotes,
   updateVaultItemTags,
 } from "~/lib/vault-items.client";
 import {
@@ -35,7 +46,7 @@ import {
 import type { EncryptedNote, EncryptedNoteSummary } from "~/lib/notes";
 import { documentPayloadToBlocks, getDocumentReferenceIds, isDocumentReferenceBlock, renderBlocks, type DocumentPayload, type DocumentPayloadV2 } from "~/lib/document-blocks";
 import { VaultItemReferenceCard } from "~/components/vault-item-reference-card";
-import { extractTasks, getLocalAICapabilities, suggestTitle, summarizeText, type LocalAICapabilities } from "~/lib/local-ai.client";
+import { detectLanguage, extractTasks, getAIContextForVaultItem, getLocalAICapabilities, rewriteText, suggestTitle, summarizeText, type LocalAICapabilities } from "~/lib/local-ai.client";
 import {
   isDocumentVaultItemType,
   VAULT_ITEM_LABELS,
@@ -43,6 +54,7 @@ import {
   vaultItemTypesMatch,
   type EncryptedVaultItem,
   type VaultItem,
+  type VaultItemEvent,
   type VaultItemType,
 } from "~/lib/vault-items";
 import { normalizeTags, type Folder, type FolderDeleteStrategy } from "~/lib/folders";
@@ -120,6 +132,15 @@ interface LegacyNoteDraft {
 }
 type NoteProtectionAction = "protect" | "change" | "remove";
 
+async function redirectIfRecent2FARequired(cause: unknown) {
+  const error = cause as { status?: number; data?: { requiresRecent2FA?: boolean; confirmUrl?: string } };
+  if (error.status === 428 && error.data?.requiresRecent2FA) {
+    window.location.assign(error.data.confirmUrl ?? "/auth/2fa/confirm");
+    return true;
+  }
+  return false;
+}
+
 function parseVaultView(value: string | null): VaultView | null {
   return VAULT_VIEWS.includes(value as VaultView) ? value as VaultView : null;
 }
@@ -144,7 +165,10 @@ export function VaultItemsPanel({ email = "" }: { email?: string; onClose?: () =
   const [noteTitles, setNoteTitles] = useState<Record<string, string>>({});
   const [legacyDraft, setLegacyDraft] = useState<LegacyNoteDraft | null>(null);
   const [protectedNote, setProtectedNote] = useState<EncryptedNote | null>(null);
+  const [protectedItem, setProtectedItem] = useState<EncryptedVaultItem | null>(null);
   const [protectionAction, setProtectionAction] = useState<NoteProtectionAction | null>(null);
+  const [itemProtectionAction, setItemProtectionAction] = useState<NoteProtectionAction | null>(null);
+  const [unlockedItemKeys, setUnlockedItemKeys] = useState<Record<string, CryptoKey>>({});
   const [localAIOpen, setLocalAIOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [deselectingId, setDeselectingId] = useState<string | null>(null);
@@ -186,10 +210,10 @@ export function VaultItemsPanel({ email = "" }: { email?: string; onClose?: () =
 
   useEffect(() => {
     if (!masterKey) return;
-    Promise.all(encryptedItems.map((item) => decryptVaultItemPayload(item, masterKey)))
+    Promise.all(encryptedItems.map((item) => decryptVaultItemPayload(item, masterKey, unlockedItemKeys[item.id] ?? null)))
       .then(setItems)
       .catch(() => toast.error("Vault items could not be decrypted."));
-  }, [encryptedItems, masterKey]);
+  }, [encryptedItems, masterKey, unlockedItemKeys]);
 
   useEffect(() => {
     if (!masterKey) return;
@@ -235,6 +259,8 @@ export function VaultItemsPanel({ email = "" }: { email?: string; onClose?: () =
       favorite: false,
       archived: false,
       pinned: false,
+      requiresRecent2FA: false,
+      hasExtraPassword: false,
       createdAt: "",
       updatedAt: "",
     });
@@ -243,6 +269,11 @@ export function VaultItemsPanel({ email = "" }: { email?: string; onClose?: () =
   }
 
   function selectItem(item: VaultItem) {
+    const encrypted = encryptedItems.find((entry) => entry.id === item.id);
+    if (encrypted?.hasExtraPassword && !unlockedItemKeys[item.id]) {
+      setProtectedItem(encrypted);
+      return;
+    }
     if (deselectTimer.current) clearTimeout(deselectTimer.current);
     setDeselectingId(null);
     setSelectedId(item.id);
@@ -318,6 +349,22 @@ export function VaultItemsPanel({ email = "" }: { email?: string; onClose?: () =
       const noteKey = await unlockProtectedNoteKey(protectedNote, password);
       await openLegacyNote(protectedNote, noteKey);
       setProtectedNote(null);
+    } catch {
+      toast.error("The password is incorrect.");
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function unlockVaultItem(password: string) {
+    if (!protectedItem || !masterKey) return;
+    setWorking(true);
+    try {
+      const itemKey = await unlockProtectedVaultItemKey(protectedItem, password);
+      const item = await decryptVaultItemPayload(protectedItem, masterKey, itemKey);
+      setUnlockedItemKeys((current) => ({ ...current, [protectedItem.id]: itemKey }));
+      setProtectedItem(null);
+      selectItem(item);
     } catch {
       toast.error("The password is incorrect.");
     } finally {
@@ -438,7 +485,8 @@ export function VaultItemsPanel({ email = "" }: { email?: string; onClose?: () =
       setNotes((current) => current.map((item) => item.id === note.id ? note : item));
       setProtectionAction(null);
       toast.success(protectionAction === "remove" ? "Protection removed" : "Protection updated");
-    } catch {
+    } catch (cause) {
+      if (await redirectIfRecent2FARequired(cause)) return;
       toast.error("The operation could not be completed. Check the password.");
     } finally {
       setWorking(false);
@@ -456,16 +504,26 @@ export function VaultItemsPanel({ email = "" }: { email?: string; onClose?: () =
         favorite: draft.favorite,
         archived: draft.archived,
         pinned: draft.pinned,
+        requiresRecent2FA: draft.requiresRecent2FA,
         folderId: draft.folderId,
+        itemKey: draft.id ? unlockedItemKeys[draft.id] : undefined,
+        itemNotes: draft.itemNotes,
+        extraPasswordFields: draft.hasExtraPassword ? {
+          extraPasswordSalt: draft.extraPasswordSalt!,
+          extraPasswordEncryptedItemKey: draft.extraPasswordEncryptedItemKey!,
+          extraPasswordItemKeyIv: draft.extraPasswordItemKeyIv!,
+        } : null,
       };
       const result = selectedId
         ? await updateVaultItem(selectedId, draft.type, draft.payload, masterKey, options)
         : await createVaultItem(draft.type, draft.payload, masterKey, options);
+      const nextDraft = await decryptVaultItemPayload(result.item, masterKey, unlockedItemKeys[result.item.id] ?? options.itemKey ?? null);
       setEncryptedItems((current) => [
         result.item,
         ...current.filter((item) => item.id !== result.item.id),
       ]);
       setSelectedId(result.item.id);
+      setDraft(nextDraft);
       workspace.openItem(result.item.id);
       toast.success(selectedId ? "Vault item saved" : "Vault item created");
     } catch {
@@ -490,17 +548,159 @@ export function VaultItemsPanel({ email = "" }: { email?: string; onClose?: () =
     }
   }
 
+  async function setDraftFavorite(favorite: boolean) {
+    if (!draft?.id) return;
+    setWorking(true);
+    try {
+      const { item } = await toggleFavorite(draft.id, favorite);
+      setEncryptedItems((current) => [item, ...current.filter((entry) => entry.id !== item.id)]);
+      setDraft({ ...draft, favorite, updatedAt: item.updatedAt });
+    } catch {
+      toast.error("Favorite could not be updated.");
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function setDraftArchived(archived: boolean) {
+    if (!draft?.id) return;
+    setWorking(true);
+    try {
+      const { item } = await archiveItem(draft.id, archived);
+      setEncryptedItems((current) => [item, ...current.filter((entry) => entry.id !== item.id)]);
+      setDraft({ ...draft, archived, updatedAt: item.updatedAt });
+    } catch {
+      toast.error("Archive state could not be updated.");
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function setDraftPinned(pinned: boolean) {
+    if (!draft?.id) return;
+    setWorking(true);
+    try {
+      const { item } = await pinItem(draft.id, pinned);
+      setEncryptedItems((current) => [item, ...current.filter((entry) => entry.id !== item.id)]);
+      setDraft({ ...draft, pinned, updatedAt: item.updatedAt });
+    } catch {
+      toast.error("Pinned state could not be updated.");
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function setDraftRecent2FA(requiresRecent2FA: boolean) {
+    if (!draft?.id) return;
+    setWorking(true);
+    try {
+      const { item } = await requireRecent2FAForItem(draft.id, requiresRecent2FA);
+      setEncryptedItems((current) => [item, ...current.filter((entry) => entry.id !== item.id)]);
+      setDraft({ ...draft, requiresRecent2FA, updatedAt: item.updatedAt });
+    } catch (cause) {
+      if (await redirectIfRecent2FARequired(cause)) return;
+      toast.error("2FA requirement could not be updated.");
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function lockDraftItem() {
+    if (!draft?.id || !masterKey) return;
+    const encrypted = encryptedItems.find((entry) => entry.id === draft.id);
+    if (!encrypted?.hasExtraPassword) return;
+    setUnlockedItemKeys((current) => {
+      const next = { ...current };
+      delete next[draft.id];
+      return next;
+    });
+    setDraft(await decryptVaultItemPayload(encrypted, masterKey, null));
+  }
+
   async function updateDraftTags(tags: string[]) {
     if (!draft?.id || !masterKey) return;
     setWorking(true);
     try {
       const normalized = normalizeTags(tags);
-      const { item } = await updateVaultItemTags(draft, normalized, masterKey);
+      const { item } = await updateVaultItemTags(draft, normalized, masterKey, unlockedItemKeys[draft.id] ?? null);
       setEncryptedItems((current) => [item, ...current.filter((entry) => entry.id !== item.id)]);
       setDraft({ ...draft, tags: normalized, updatedAt: item.updatedAt });
       toast.success("Tags updated");
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : "Tags could not be updated.");
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function updateDraftItemNotes(markdown: string) {
+    if (!draft?.id || !masterKey) return;
+    const { item } = await updateVaultItemNotes(draft, markdown, masterKey, unlockedItemKeys[draft.id] ?? null);
+    const nextDraft = await decryptVaultItemPayload(item, masterKey, unlockedItemKeys[draft.id] ?? null);
+    setEncryptedItems((current) => [item, ...current.filter((entry) => entry.id !== item.id)]);
+    setDraft(nextDraft);
+  }
+
+  async function handleItemProtectionAction(currentPassword: string, newPassword: string) {
+    if (!draft || !masterKey || !itemProtectionAction) return;
+    const encrypted = encryptedItems.find((item) => item.id === draft.id);
+    setWorking(true);
+    try {
+      if (draft.requiresRecent2FA) await authorizeSensitiveVaultAction();
+      let itemKey: CryptoKey | null = null;
+      let nextDraft = draft;
+      if (itemProtectionAction === "protect") {
+        const result = await protectVaultItem(draft, newPassword, masterKey);
+        itemKey = result.itemKey;
+        const response = await updateVaultItem(draft.id, draft.type, draft.payload, masterKey, {
+          title: draft.title,
+          tags: draft.tags,
+          favorite: draft.favorite,
+          archived: draft.archived,
+          pinned: draft.pinned,
+          requiresRecent2FA: draft.requiresRecent2FA,
+          folderId: draft.folderId,
+          itemKey,
+          itemNotes: draft.itemNotes,
+          extraPasswordFields: {
+            extraPasswordSalt: result.input.extraPasswordSalt!,
+            extraPasswordEncryptedItemKey: result.input.extraPasswordEncryptedItemKey!,
+            extraPasswordItemKeyIv: result.input.extraPasswordItemKeyIv!,
+          },
+        });
+        nextDraft = await decryptVaultItemPayload(response.item, masterKey, itemKey);
+        setEncryptedItems((current) => [response.item, ...current.filter((entry) => entry.id !== response.item.id)]);
+      } else if (encrypted) {
+        const changed = itemProtectionAction === "change"
+          ? await changeVaultItemExtraPassword(encrypted, currentPassword, newPassword)
+          : null;
+        itemKey = changed?.itemKey ?? await removeVaultItemExtraPassword(encrypted, currentPassword);
+        const response = await updateVaultItem(draft.id, draft.type, draft.payload, masterKey, {
+          title: draft.title,
+          tags: draft.tags,
+          favorite: draft.favorite,
+          archived: draft.archived,
+          pinned: draft.pinned,
+          requiresRecent2FA: draft.requiresRecent2FA,
+          folderId: draft.folderId,
+          itemKey: itemProtectionAction === "remove" ? undefined : itemKey,
+          itemNotes: draft.itemNotes,
+          extraPasswordFields: itemProtectionAction === "remove" ? null : changed!.extraPasswordFields,
+        });
+        nextDraft = await decryptVaultItemPayload(response.item, masterKey, itemProtectionAction === "remove" ? null : itemKey);
+        setEncryptedItems((current) => [response.item, ...current.filter((entry) => entry.id !== response.item.id)]);
+      }
+      if (itemKey && itemProtectionAction !== "remove") setUnlockedItemKeys((current) => ({ ...current, [draft.id]: itemKey }));
+      if (itemProtectionAction === "remove") setUnlockedItemKeys((current) => {
+        const next = { ...current };
+        delete next[draft.id];
+        return next;
+      });
+      setDraft(nextDraft);
+      setItemProtectionAction(null);
+      toast.success(itemProtectionAction === "remove" ? "Protection removed" : "Protection updated");
+    } catch {
+      toast.error("The operation could not be completed. Check the password.");
     } finally {
       setWorking(false);
     }
@@ -543,6 +743,8 @@ export function VaultItemsPanel({ email = "" }: { email?: string; onClose?: () =
       favorite: note.pinned,
       pinned: note.pinned,
       archived: note.archived,
+      requiresRecent2FA: false,
+      hasExtraPassword: note.hasExtraPassword,
       createdAt: note.createdAt,
       updatedAt: note.updatedAt,
     })),
@@ -558,7 +760,7 @@ export function VaultItemsPanel({ email = "" }: { email?: string; onClose?: () =
     if (filter !== "all" && !vaultItemTypesMatch(item.type, filter)) return false;
     if (!query.trim()) return true;
     const folderName = folderState.folders.find((folder) => folder.id === item.folderId)?.name ?? "";
-    return JSON.stringify([item.title, item.tags, item.payload, folderName])
+    return JSON.stringify([item.title, item.tags, getSafeSearchParts(item), folderName])
       .toLocaleLowerCase().includes(query.trim().toLocaleLowerCase());
   }).sort((left, right) => {
     if (sortMode === "updated-asc") return Date.parse(left.updatedAt) - Date.parse(right.updatedAt);
@@ -717,7 +919,7 @@ export function VaultItemsPanel({ email = "" }: { email?: string; onClose?: () =
         <button type="button" onClick={clearSelection} className="vault-back"><FiArrowLeft /> Back to {activeGroupTitle}</button>
         {editing
           ? <div className="vault-detail-scroll"><div className="vault-edit-heading"><VaultItemEditIntro type={draft.type} /><button type="button" onClick={() => setEditing(false)} className="vault-secondary-button">Cancel</button></div><VaultItemForm draft={draft} setDraft={setDraft} items={items} folders={folderState.folders} working={working} onOpenItem={selectItem} onSave={() => void save().then(() => setEditing(false))} onDelete={selectedId ? confirmDelete : undefined} /></div>
-          : <VaultItemPreview item={draft} items={items} referencedBy={referencedBy} folders={breadcrumbs} allFolders={folderState.folders} working={working} onOpenItem={selectItem} onEdit={() => setEditing(true)} onFavorite={() => setDraft({ ...draft, favorite: !draft.favorite })} onFolder={(folderId) => void moveDraftItem(folderId)} onTags={(tags) => void updateDraftTags(tags)} />}
+          : <VaultItemPreview item={draft} items={items} referencedBy={referencedBy} folders={breadcrumbs} allFolders={folderState.folders} working={working} onOpenItem={selectItem} onEdit={() => setEditing(true)} onFavorite={() => void setDraftFavorite(!draft.favorite)} onPin={() => void setDraftPinned(!draft.pinned)} onArchive={() => void setDraftArchived(!draft.archived)} onRecent2FA={() => void setDraftRecent2FA(!draft.requiresRecent2FA)} onLock={() => void lockDraftItem()} onFolder={(folderId) => void moveDraftItem(folderId)} onTags={(tags) => void updateDraftTags(tags)} onItemNotes={(markdown) => updateDraftItemNotes(markdown)} onProtection={setItemProtectionAction} onDelete={confirmDelete} />}
       </main> : null}
       {legacyDraft ? <main className={`vault-detail ${detailOpen ? "is-open" : ""}`}>
         <button type="button" onClick={clearSelection} className="vault-back"><FiArrowLeft /> Back to {activeGroupTitle}</button>
@@ -726,7 +928,9 @@ export function VaultItemsPanel({ email = "" }: { email?: string; onClose?: () =
       <button type="button" title={workspace.sidebarCollapsed ? "Show sidebar" : "Hide sidebar"} aria-label={workspace.sidebarCollapsed ? "Show sidebar" : "Hide sidebar"} onClick={() => workspace.setSidebarCollapsed(!workspace.sidebarCollapsed)} className="vault-sidebar-toggle">{workspace.sidebarCollapsed ? <FiChevronRight /> : <FiChevronLeft />}</button>
       {filterDialogOpen ? <FilterDialog type={filter} folderId={activeFolderId} tag={activeTag} folders={folderState.folders} tags={tags} onClose={() => setFilterDialogOpen(false)} onApply={(next) => { setFilter(next.type); setActiveFolderId(next.folderId); setActiveTag(next.tag); workspace.setOrganizationState({ activeTypeFilter: next.type, activeFolderId: next.folderId }); writeFiltersToUrl({ view, type: next.type, folderId: next.folderId, tag: next.tag }); setFilterDialogOpen(false); }} /> : null}
       {protectedNote ? <ProtectedNoteDialog working={working} onClose={() => setProtectedNote(null)} onUnlock={(password) => void unlockLegacyNote(password)} /> : null}
-      {protectionAction ? <NoteProtectionDialog mode={protectionAction} working={working} onClose={() => setProtectionAction(null)} onSubmit={(currentPassword, newPassword) => void handleProtectionAction(currentPassword, newPassword)} /> : null}
+      {protectedItem ? <ProtectedItemDialog working={working} onClose={() => setProtectedItem(null)} onUnlock={(password) => void unlockVaultItem(password)} /> : null}
+      {protectionAction ? <NoteProtectionDialog mode={protectionAction} subject="note" working={working} onClose={() => setProtectionAction(null)} onSubmit={(currentPassword, newPassword) => void handleProtectionAction(currentPassword, newPassword)} /> : null}
+      {itemProtectionAction ? <NoteProtectionDialog mode={itemProtectionAction} subject="item" working={working} onClose={() => setItemProtectionAction(null)} onSubmit={(currentPassword, newPassword) => void handleItemProtectionAction(currentPassword, newPassword)} /> : null}
       {localAIOpen && legacyDraft ? <LocalAINoteDialog note={legacyDraft} onClose={() => setLocalAIOpen(false)} onChange={(changes) => { const next = { ...legacyDraft, ...changes }; setLegacyDraft(next); void saveLegacyNote(next); }} /> : null}
       {folderDialog ? <FolderDialog mode={folderDialog.mode} folder={folderDialog.folder} defaultParentFolderId={folderDialog.parentFolderId} folders={folderState.folders} onClose={() => setFolderDialog(null)} onSubmit={async (name, parentFolderId) => {
         try {
@@ -908,7 +1112,9 @@ function FolderTree({ folders, activeFolderId, counts, onSelect, onRename, onDel
   return <div className="vault-folder-tree">{render(null)}</div>;
 }
 
-function VaultItemPreview({ item, items, referencedBy, folders, allFolders, working, onOpenItem, onEdit, onFavorite, onFolder, onTags }: {
+type VaultItemTab = "details" | "notes" | "history";
+
+function VaultItemPreview({ item, items, referencedBy, folders, allFolders, working, onOpenItem, onEdit, onFavorite, onPin, onArchive, onRecent2FA, onLock, onFolder, onTags, onItemNotes, onProtection, onDelete }: {
   item: VaultItem;
   items: VaultItem[];
   referencedBy: VaultItem[];
@@ -918,35 +1124,59 @@ function VaultItemPreview({ item, items, referencedBy, folders, allFolders, work
   onOpenItem: (item: VaultItem) => void;
   onEdit: () => void;
   onFavorite: () => void;
+  onPin: () => void;
+  onArchive: () => void;
+  onRecent2FA: () => void;
+  onLock: () => void;
   onFolder: (folderId: string | null) => void;
   onTags: (tags: string[]) => void;
+  onItemNotes: (markdown: string) => Promise<void>;
+  onProtection: (mode: NoteProtectionAction) => void;
+  onDelete: () => void;
 }) {
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
   const [folderOpen, setFolderOpen] = useState(false);
   const [tagsOpen, setTagsOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [aiOpen, setAIOpen] = useState(false);
+  const [tab, setTab] = useState<VaultItemTab>("details");
   const payload = item.payload as Record<string, unknown>;
+  const aiContext = getAIContextForVaultItem(item);
+  const authorizeIfNeeded = async () => {
+    if (!item.requiresRecent2FA) return;
+    await authorizeSensitiveVaultAction();
+  };
+  const copy = () => void authorizeIfNeeded()
+    .then(() => navigator.clipboard.writeText(item.type === "document" ? blocksToPlainText(item.payload as DocumentPayload) : JSON.stringify(getSafeSearchParts(item), null, 2)))
+    .then(() => toast.success("Item copied"))
+    .catch(async (cause) => { if (!(await redirectIfRecent2FARequired(cause))) toast.error("Copy could not be authorized."); });
   return <div className="vault-detail-scroll">
     <div className="vault-breadcrumbs"><FiFolder /><span>{folders.length ? folders.map((folder) => folder.name).join("  ›  ") : "Uncategorized"}</span><button type="button" disabled={working} onClick={() => setFolderOpen((open) => !open)}><FiEdit3 /> Move</button></div>
     {folderOpen ? <div className="vault-preview-quick-edit"><FolderCombobox label="Move to folder" value={item.folderId} folders={allFolders} onChange={(folderId) => { onFolder(folderId); setFolderOpen(false); }} compact /></div> : null}
     <header className="vault-preview-header">
       <ItemVisual type={item.type} payload={payload} large />
       <div className="min-w-0 flex-1"><h2>{item.title || "Untitled"}</h2><div className="vault-tags"><span className="vault-type-chip">{VAULT_ITEM_LABELS[item.type]}</span>{folders.at(-1) ? <span className="vault-folder-chip">{folders.at(-1)!.name}</span> : null}{item.tags.map((tag) => <span className="vault-tag-chip" key={tag}># {tag}</span>)}<button type="button" disabled={working} className="vault-tags-manage" onClick={() => setTagsOpen((open) => !open)}><FiPlus /> Manage tags</button></div><p>Updated {formatHumanDate(item.updatedAt)} &nbsp;&nbsp; Created {formatHumanDate(item.createdAt)}</p></div>
-      <button type="button" onClick={onFavorite} className="vault-icon-button"><FiStar className={item.favorite ? "fill-amber-400 text-amber-400" : ""} /></button><button type="button" className="vault-icon-button"><FiMoreVertical /></button>
+      <button type="button" onClick={onFavorite} className="vault-icon-button"><FiStar className={item.favorite ? "fill-amber-400 text-amber-400" : ""} /></button><div className="vault-note-menu-anchor"><button type="button" className="vault-icon-button" onClick={() => setMenuOpen((open) => !open)}><FiMoreVertical /></button>{menuOpen ? <VaultItemActionsMenu item={item} folders={allFolders} working={working} aiAvailable={Boolean(aiContext)} onClose={() => setMenuOpen(false)} onCopy={copy} onEdit={onEdit} onFavorite={onFavorite} onPin={onPin} onArchive={onArchive} onRecent2FA={onRecent2FA} onLock={onLock} onFolder={onFolder} onLocalAI={() => setAIOpen(true)} onProtection={onProtection} onDelete={onDelete} /> : null}</div>
     </header>
     {tagsOpen ? <div className="vault-preview-quick-edit vault-preview-tags-editor"><TagInput tags={item.tags} onChange={onTags} compact /></div> : null}
-    <div className="vault-preview-tabs"><button className="active">Details</button><button>Notes</button><button>History</button><button type="button" className="ml-auto vault-secondary-button" onClick={onEdit}><FiEdit3 /> Edit</button></div>
-    <section className="vault-detail-card">
-      {item.type === "document"
-        ? <DocumentPreviewContent payload={item.payload as DocumentPayload} items={items} onOpenItem={onOpenItem} />
-        : Object.entries(item.payload).map(([field, rawValue]) => {
-        const sensitive = SENSITIVE_FIELDS.has(field);
-        const value = Array.isArray(rawValue) ? rawValue.map((entry) => typeof entry === "string" ? entry : JSON.stringify(entry)).join("\n") : String(rawValue ?? "");
-        const externalUrl = item.type === "bookmark" && field === "url" ? normalizeExternalUrl(value) : null;
-        return <div className="vault-preview-field" key={field}><div><span>{FIELD_LABELS[field] ?? field}</span><p className={sensitive && !revealed[field] ? "vault-secret" : ""}>{sensitive && !revealed[field] ? "••••••••••••••" : value || "—"}</p></div><div className="flex gap-2">{sensitive ? <button type="button" className="vault-icon-button" onClick={() => setRevealed((current) => ({ ...current, [field]: !current[field] }))}>{revealed[field] ? <FiEyeOff /> : <FiEye />}</button> : null}{externalUrl ? <a className="vault-icon-button" href={externalUrl} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer" title="Open bookmark" aria-label="Open bookmark in a new tab"><FiExternalLink /></a> : null}<button type="button" className="vault-icon-button" onClick={() => void copySensitiveValue(value).then(() => toast.success("Copied; clipboard will clear in 30 seconds"))}><FiCopy /></button></div></div>;
-      })}
-    </section>
-    {referencedBy.length ? <section className="vault-detail-card vault-backlinks"><h3>Referenced by</h3>{referencedBy.map((documentItem) => <button type="button" key={documentItem.id} onClick={() => onOpenItem(documentItem)}><FiFileText /><span><strong>{documentItem.title || "Untitled"}</strong><small>Document</small></span></button>)}</section> : null}
-    <section className="vault-detail-card vault-meta-card"><div><span>Folder</span><p className="vault-folder-value"><FiFolder /> {folders.at(-1)?.name ?? "Uncategorized"}</p></div><div><span>Tags</span><p className="vault-tags">{item.tags.length ? item.tags.map((tag) => <em className="vault-tag-chip" key={tag}># {tag}</em>) : "No tags"}</p></div><div><span>Created</span><p>{formatDateTime(item.createdAt)}</p></div><div><span>Updated</span><p>{formatDateTime(item.updatedAt)}</p></div></section>
+    <div className="vault-preview-tabs"><button type="button" className={tab === "details" ? "active" : ""} onClick={() => setTab("details")}>Details</button><button type="button" className={tab === "notes" ? "active" : ""} onClick={() => setTab("notes")}>Notes</button><button type="button" className={tab === "history" ? "active" : ""} onClick={() => setTab("history")}>History</button>{tab === "details" ? <button type="button" className="ml-auto vault-secondary-button" onClick={onEdit}><FiEdit3 /> Edit</button> : null}</div>
+    {tab === "details" ? <>
+      <section className="vault-detail-card">
+        {item.type === "document"
+          ? <DocumentPreviewContent payload={item.payload as DocumentPayload} items={items} onOpenItem={onOpenItem} />
+          : Object.entries(item.payload).map(([field, rawValue]) => {
+          const sensitive = SENSITIVE_FIELDS.has(field);
+          const value = Array.isArray(rawValue) ? rawValue.map((entry) => typeof entry === "string" ? entry : JSON.stringify(entry)).join("\n") : String(rawValue ?? "");
+          const externalUrl = item.type === "bookmark" && field === "url" ? normalizeExternalUrl(value) : null;
+          return <div className="vault-preview-field" key={field}><div><span>{FIELD_LABELS[field] ?? field}</span><p className={sensitive && !revealed[field] ? "vault-secret" : ""}>{sensitive && !revealed[field] ? "••••••••••••••" : value || "—"}</p></div><div className="flex gap-2">{sensitive ? <button type="button" className="vault-icon-button" onClick={() => void authorizeIfNeeded().then(() => setRevealed((current) => ({ ...current, [field]: !current[field] }))).catch(async (cause) => { if (!(await redirectIfRecent2FARequired(cause))) toast.error("Reveal could not be authorized."); })}>{revealed[field] ? <FiEyeOff /> : <FiEye />}</button> : null}{externalUrl ? <a className="vault-icon-button" href={externalUrl} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer" title="Open bookmark" aria-label="Open bookmark in a new tab"><FiExternalLink /></a> : null}<button type="button" className="vault-icon-button" onClick={() => void (sensitive ? authorizeIfNeeded() : Promise.resolve()).then(() => copySensitiveValue(value)).then(() => toast.success("Copied; clipboard will clear in 30 seconds")).catch(async (cause) => { if (!(await redirectIfRecent2FARequired(cause))) toast.error("Copy could not be authorized."); })}><FiCopy /></button></div></div>;
+        })}
+      </section>
+      {referencedBy.length ? <section className="vault-detail-card vault-backlinks"><h3>Referenced by</h3>{referencedBy.map((documentItem) => <button type="button" key={documentItem.id} onClick={() => onOpenItem(documentItem)}><FiFileText /><span><strong>{documentItem.title || "Untitled"}</strong><small>Document</small></span></button>)}</section> : null}
+      <section className="vault-detail-card vault-meta-card"><div><span>Folder</span><p className="vault-folder-value"><FiFolder /> {folders.at(-1)?.name ?? "Uncategorized"}</p></div><div><span>Tags</span><p className="vault-tags">{item.tags.length ? item.tags.map((tag) => <em className="vault-tag-chip" key={tag}># {tag}</em>) : "No tags"}</p></div><div><span>Created</span><p>{formatDateTime(item.createdAt)}</p></div><div><span>Updated</span><p>{formatDateTime(item.updatedAt)}</p></div></section>
+    </> : null}
+    {tab === "notes" ? <VaultItemNotesTab item={item} onSave={onItemNotes} /> : null}
+    {tab === "history" ? <VaultItemHistoryTab itemId={item.id} folders={allFolders} /> : null}
+    {aiOpen && aiContext ? <VaultItemAIDialog item={item} context={aiContext} onClose={() => setAIOpen(false)} onAppendNotes={(text) => onItemNotes(`${item.itemNotes?.markdown ?? ""}${item.itemNotes?.markdown ? "\n\n" : ""}${text}`)} /> : null}
   </div>;
 }
 
@@ -967,6 +1197,119 @@ function DocumentPreviewContent({ payload, items, onOpenItem }: { payload: Docum
       return <p key={block.id}>{block.text || "\u00a0"}</p>;
     })}
   </div>;
+}
+
+function VaultItemNotesTab({ item, onSave }: { item: VaultItem; onSave: (markdown: string) => Promise<void> }) {
+  const [editing, setEditing] = useState(false);
+  const [markdown, setMarkdown] = useState(item.itemNotes?.markdown ?? "");
+  const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSaved = useRef(item.itemNotes?.markdown ?? "");
+
+  useEffect(() => {
+    const next = item.itemNotes?.markdown ?? "";
+    setMarkdown(next);
+    lastSaved.current = next;
+    setStatus("idle");
+  }, [item.id, item.itemNotes?.updatedAt]);
+
+  useEffect(() => () => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+  }, []);
+
+  const saveNow = async (value = markdown) => {
+    if (value === lastSaved.current) {
+      setStatus("idle");
+      return;
+    }
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    setStatus("saving");
+    try {
+      await onSave(value);
+      lastSaved.current = value;
+      setStatus("saved");
+    } catch {
+      setStatus("error");
+    }
+  };
+
+  const scheduleSave = (value: string) => {
+    setMarkdown(value);
+    if (value === lastSaved.current) {
+      setStatus("idle");
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      return;
+    }
+    setStatus("saving");
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => void saveNow(value), 850);
+  };
+
+  if (!editing && !markdown.trim()) {
+    return <section className="vault-detail-card vault-notes-tab"><div className="vault-empty"><p>No hay notas para este item</p><button type="button" className="vault-primary-button" onClick={() => setEditing(true)}><FiPlus /> Agregar nota</button></div></section>;
+  }
+
+  return <section className="vault-detail-card vault-notes-tab">
+    <header className="mb-3 flex items-center justify-between gap-3">
+      <div><h3 className="text-sm font-semibold text-slate-100">Private notes</h3><p className="text-xs text-slate-400">{status === "saving" ? "Guardando..." : status === "saved" ? "Guardado" : status === "error" ? "Error al guardar" : item.itemNotes?.updatedAt ? `Updated ${formatDateTime(item.itemNotes.updatedAt)}` : "Markdown notes encrypted with this item"}</p></div>
+      <div className="flex gap-2">{editing ? <button type="button" className="vault-primary-button" onClick={() => void saveNow()}><FiSave /> Save notes</button> : null}<button type="button" className="vault-secondary-button" onClick={() => setEditing((value) => !value)}><FiEdit3 /> {editing ? "Preview" : "Edit notes"}</button></div>
+    </header>
+    {editing ? <div data-color-mode="dark"><MDEditor value={markdown} onChange={(value) => scheduleSave(value ?? "")} preview="edit" height={360} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") { event.preventDefault(); void saveNow(); } }} /></div>
+      : <div className="vault-note-content">{markdown.trim() ? <MDEditor.Markdown source={markdown} /> : <p className="text-slate-400">No hay notas para este item</p>}</div>}
+  </section>;
+}
+
+function VaultItemHistoryTab({ itemId, folders }: { itemId: string; folders: Folder[] }) {
+  const [events, setEvents] = useState<VaultItemEvent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    setLoading(true);
+    setError(false);
+    void listVaultItemEvents(itemId)
+      .then((result) => setEvents(result.events))
+      .catch(() => setError(true))
+      .finally(() => setLoading(false));
+  }, [itemId]);
+
+  if (loading) return <section className="vault-detail-card p-5 text-sm text-slate-400">Loading history...</section>;
+  if (error) return <section className="vault-detail-card p-5 text-sm text-red-300">History could not be loaded.</section>;
+  if (!events.length) return <section className="vault-detail-card"><div className="vault-empty"><p>No history yet</p></div></section>;
+
+  const grouped = groupEventsByDay(events);
+  return <section className="vault-detail-card vault-history-tab">
+    {grouped.map(([label, entries]) => <div key={label} className="vault-history-group">
+      <h3>{label}</h3>
+      <div>{entries.map((event) => <div key={event.id} className="vault-history-event"><span><FiClock /></span><p>{eventLabel(event, folders)} <small>· {new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(event.createdAt))}</small></p></div>)}</div>
+    </div>)}
+  </section>;
+}
+
+function VaultItemAIDialog({ item, context, onClose, onAppendNotes }: { item: VaultItem; context: string; onClose: () => void; onAppendNotes: (text: string) => Promise<void> }) {
+  const [capabilities, setCapabilities] = useState<LocalAICapabilities | null>(null);
+  const [result, setResult] = useState("");
+  const [action, setAction] = useState<"summary" | "title" | "tasks" | "language" | "rewrite" | null>(null);
+  const [working, setWorking] = useState(true);
+  useEffect(() => { void getLocalAICapabilities().then(setCapabilities).finally(() => setWorking(false)); }, []);
+  const run = async (next: "summary" | "title" | "tasks" | "language" | "rewrite") => {
+    setWorking(true);
+    setAction(next);
+    setResult("");
+    try {
+      if (next === "summary") setResult(await summarizeText(context));
+      else if (next === "title") setResult(await suggestTitle(context));
+      else if (next === "tasks") setResult(await extractTasks(context));
+      else if (next === "rewrite") setResult(await rewriteText(context, "Make this clearer and more concise."));
+      else {
+        const languages = await detectLanguage(context);
+        setResult(languages.length ? languages.map((entry) => `${entry.detectedLanguage} (${Math.round(entry.confidence * 100)}%)`).join("\n") : "No language detected.");
+      }
+    } catch { toast.error("This Local AI action is unavailable in this browser."); }
+    finally { setWorking(false); }
+  };
+  const available = capabilities && Object.values(capabilities).some((value) => value !== "unavailable");
+  return <div className="vault-dialog-backdrop"><section className="vault-dialog vault-ai-dialog"><header><div><h3 className="flex items-center gap-2"><FiCpu /> Local AI</h3><p>Runs locally on safe text from this {VAULT_ITEM_LABELS[item.type].toLocaleLowerCase()}.</p></div><button type="button" className="vault-icon-button" onClick={onClose}><FiX /></button></header><div className="vault-ai-actions"><button disabled={working || !available} onClick={() => void run("summary")}>Summarize</button><button disabled={working || !available} onClick={() => void run("title")}>Suggest title</button><button disabled={working || !available} onClick={() => void run("tasks")}>Extract tasks</button><button disabled={working || !available} onClick={() => void run("language")}>Detect language</button><button disabled={working || !available} onClick={() => void run("rewrite")}>Rewrite</button></div>{!working && !available ? <p className="mt-4 text-sm text-slate-400">Local AI is unavailable in this browser or device.</p> : null}{result ? <div className="vault-ai-result"><pre>{result}</pre>{action !== "language" ? <button className="vault-primary-button" onClick={() => void onAppendNotes(result).then(onClose).catch(() => toast.error("AI result could not be added to notes."))}>Insert into item notes</button> : null}</div> : null}</section></div>;
 }
 
 function LegacyNoteDetail({ note, editing, working, folders, onEdit, onCancel, onChange, onSave, onPin, onArchive, onFolder, onCritical, onProtection, onDelete, onLocalAI }: {
@@ -1029,6 +1372,65 @@ function NoteActionsMenu({ note, folders, working, onClose, onCopy, onPin, onArc
   </div>;
 }
 
+function VaultItemActionsMenu({ item, folders, working, aiAvailable, onClose, onCopy, onEdit, onFavorite, onPin, onArchive, onRecent2FA, onLock, onFolder, onLocalAI, onProtection, onDelete }: {
+  item: VaultItem; folders: Folder[]; working: boolean; aiAvailable: boolean; onClose: () => void; onCopy: () => void; onEdit: () => void; onFavorite: () => void; onPin: () => void; onArchive: () => void; onRecent2FA: () => void; onLock: () => void; onFolder: (id: string | null) => void; onLocalAI: () => void; onProtection: (mode: NoteProtectionAction) => void; onDelete: () => void;
+}) {
+  const action = (run: () => void) => { run(); onClose(); };
+  return <div className="vault-note-menu">
+    <MenuLabel label="Item" />
+    <MenuAction icon={<FiEdit3 />} label="Edit" onClick={() => action(onEdit)} />
+    <MenuAction icon={<FiCopy />} label="Copy" onClick={() => action(onCopy)} />
+    <MenuAction icon={<FiStar />} label={item.favorite ? "Unfavorite" : "Favorite"} onClick={() => action(onFavorite)} />
+    <MenuAction icon={<FiBookmark />} label={item.pinned ? "Unpin" : "Pin"} onClick={() => action(onPin)} />
+    <MenuAction icon={<FiArchive />} label={item.archived ? "Unarchive" : "Archive"} onClick={() => action(onArchive)} />
+    <div className="vault-menu-folder"><FolderCombobox label="Folder" value={item.folderId} folders={folders} onChange={(folderId) => action(() => onFolder(folderId))} compact /></div>
+    <MenuDivider />
+    <MenuLabel label="Intelligence" /><MenuAction icon={<FiCpu />} label="Local AI" disabled={!aiAvailable} onClick={() => action(onLocalAI)} />
+    <MenuDivider />
+    <MenuLabel label="Security" />
+    <MenuAction icon={<FiShield />} label={item.requiresRecent2FA ? "Disable recent 2FA" : "Require recent 2FA"} disabled={working} onClick={() => action(onRecent2FA)} />
+    {item.hasExtraPassword ? <><MenuAction icon={<FiLock />} label="Lock item" disabled={working} onClick={() => action(onLock)} /><MenuAction icon={<FiKey />} label="Change extra password" disabled={working} onClick={() => action(() => onProtection("change"))} /><MenuAction icon={<FiUnlock />} label="Remove extra password" disabled={working} onClick={() => action(() => onProtection("remove"))} /></> : <MenuAction icon={<FiShield />} label="Enable extra password" disabled={working} onClick={() => action(() => onProtection("protect"))} />}
+    <MenuDivider /><MenuLabel label="Danger zone" /><MenuAction danger icon={<FiTrash2 />} label="Delete" onClick={() => action(onDelete)} />
+  </div>;
+}
+
+function blocksToPlainText(payload: DocumentPayload) {
+  return renderBlocks(documentPayloadToBlocks(payload)).map((block: { type: string; text?: string }) => {
+    if ("text" in block) return block.text;
+    if (block.type === "divider") return "---";
+    return "";
+  }).join("\n");
+}
+
+function getSafeSearchParts(item: VaultItem) {
+  const payload = item.payload as Record<string, unknown>;
+  const parts: unknown[] = [item.itemNotes?.markdown ?? ""];
+  const add = (field: string) => {
+    const value = payload[field];
+    if (value !== undefined && value !== null) parts.push(value);
+  };
+  if (item.type === "document" || item.type === "note") {
+    parts.push(blocksToPlainText(item.payload as DocumentPayload));
+  } else if (item.type === "password") {
+    ["username", "url", "notes"].forEach(add);
+  } else if (item.type === "secret") {
+    ["name", "environment", "notes"].forEach(add);
+  } else if (item.type === "database") {
+    ["engine", "host", "database", "username", "notes"].forEach(add);
+  } else if (item.type === "credit_card") {
+    ["cardholder", "bank", "notes"].forEach(add);
+  } else if (item.type === "identity") {
+    ["fullName", "documentType", "country", "notes"].forEach(add);
+  } else if (item.type === "recovery_codes") {
+    ["service", "notes"].forEach(add);
+  } else {
+    Object.entries(payload).forEach(([field, value]) => {
+      if (!SENSITIVE_FIELDS.has(field) && field !== "connectionString") parts.push(value);
+    });
+  }
+  return parts;
+}
+
 function MenuLabel({ label }: { label: string }) { return <p className="vault-menu-label">{label}</p>; }
 function MenuDivider() { return <div className="vault-menu-divider" />; }
 function MenuAction({ icon, label, danger, disabled, onClick }: { icon: React.ReactNode; label: string; danger?: boolean; disabled?: boolean; onClick: () => void }) {
@@ -1047,13 +1449,19 @@ function ProtectedNoteDialog({ working, onClose, onUnlock }: { working: boolean;
   return <div className="vault-dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><form className="vault-dialog" onSubmit={(event) => { event.preventDefault(); onUnlock(password); }}><header><div><h3>Unlock protected note</h3><p>Enter the additional password for this note.</p></div><button type="button" className="vault-icon-button" onClick={onClose}><FiX /></button></header><label>Password<input autoFocus type="password" value={password} onChange={(event) => setPassword(event.target.value)} className="mt-2 block w-full rounded-lg border border-[#202938] bg-[#0b111a] px-3 py-2.5 text-sm text-white outline-none focus:border-violet-500" /></label><footer><button type="button" className="vault-secondary-button" onClick={onClose}>Cancel</button><button disabled={working || !password} className="vault-primary-button"><FiUnlock /> Unlock</button></footer></form></div>;
 }
 
-function NoteProtectionDialog({ mode, working, onClose, onSubmit }: { mode: NoteProtectionAction; working: boolean; onClose: () => void; onSubmit: (currentPassword: string, newPassword: string) => void }) {
+function ProtectedItemDialog({ working, onClose, onUnlock }: { working: boolean; onClose: () => void; onUnlock: (password: string) => void }) {
+  const [password, setPassword] = useState("");
+  return <div className="vault-dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><form className="vault-dialog" onSubmit={(event) => { event.preventDefault(); onUnlock(password); }}><header><div><h3>Unlock protected item</h3><p>Enter the additional password for this item.</p></div><button type="button" className="vault-icon-button" onClick={onClose}><FiX /></button></header><label>Password<input autoFocus type="password" value={password} onChange={(event) => setPassword(event.target.value)} className="mt-2 block w-full rounded-lg border border-[#202938] bg-[#0b111a] px-3 py-2.5 text-sm text-white outline-none focus:border-violet-500" /></label><footer><button type="button" className="vault-secondary-button" onClick={onClose}>Cancel</button><button disabled={working || !password} className="vault-primary-button"><FiUnlock /> Unlock</button></footer></form></div>;
+}
+
+function NoteProtectionDialog({ mode, subject, working, onClose, onSubmit }: { mode: NoteProtectionAction; subject: "note" | "item"; working: boolean; onClose: () => void; onSubmit: (currentPassword: string, newPassword: string) => void }) {
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [confirmation, setConfirmation] = useState("");
   const needsCurrent = mode !== "protect";
   const needsNew = mode !== "remove";
-  return <div className="vault-dialog-backdrop"><form className="vault-dialog" onSubmit={(event) => { event.preventDefault(); onSubmit(current, next); }}><header><div><h3>{mode === "protect" ? "Protect note" : mode === "change" ? "Change password" : "Remove protection"}</h3><p>This password is never sent to the server and cannot be recovered.</p></div><button type="button" className="vault-icon-button" onClick={onClose}><FiX /></button></header>{needsCurrent ? <label>Current password<input type="password" value={current} onChange={(event) => setCurrent(event.target.value)} /></label> : null}{needsNew ? <><label>New password<input type="password" value={next} onChange={(event) => setNext(event.target.value)} /></label><label>Confirm password<input type="password" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></label></> : null}<footer><button type="button" className="vault-secondary-button" onClick={onClose}>Cancel</button><button disabled={working || (needsCurrent && !current) || (needsNew && (!next || next !== confirmation))} className="vault-primary-button">Continue</button></footer></form></div>;
+  const title = mode === "protect" ? `Protect ${subject}` : mode === "change" ? "Change password" : "Remove protection";
+  return <div className="vault-dialog-backdrop"><form className="vault-dialog" onSubmit={(event) => { event.preventDefault(); onSubmit(current, next); }}><header><div><h3>{title}</h3><p>This password is never sent to the server and cannot be recovered.</p></div><button type="button" className="vault-icon-button" onClick={onClose}><FiX /></button></header>{needsCurrent ? <label>Current password<input type="password" value={current} onChange={(event) => setCurrent(event.target.value)} /></label> : null}{needsNew ? <><label>New password<input type="password" value={next} onChange={(event) => setNext(event.target.value)} /></label><label>Confirm password<input type="password" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></label></> : null}<footer><button type="button" className="vault-secondary-button" onClick={onClose}>Cancel</button><button disabled={working || (needsCurrent && !current) || (needsNew && (!next || next !== confirmation))} className="vault-primary-button">Continue</button></footer></form></div>;
 }
 
 function LocalAINoteDialog({ note, onClose, onChange }: { note: LegacyNoteDraft; onClose: () => void; onChange: (changes: Partial<Pick<LegacyNoteDraft, "title" | "content">>) => void }) {
@@ -1083,9 +1491,67 @@ function formatRelativeDate(value: string) {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
+function groupEventsByDay(events: VaultItemEvent[]) {
+  const groups = new Map<string, VaultItemEvent[]>();
+  events.forEach((event) => {
+    const label = historyDayLabel(event.createdAt);
+    groups.set(label, [...groups.get(label) ?? [], event]);
+  });
+  return Array.from(groups.entries());
+}
+
+function historyDayLabel(value: string) {
+  const date = new Date(value);
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const days = Math.round((startOfToday.getTime() - startOfDate.getTime()) / 86_400_000);
+  if (days === 0) return "Today";
+  if (days === 1) return "Yesterday";
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    ...(date.getFullYear() !== now.getFullYear() ? { year: "numeric" } : {}),
+  }).format(date);
+}
+
+function eventLabel(event: VaultItemEvent, folders: Folder[]) {
+  const folderName = (id: string | null | undefined) => id ? folders.find((folder) => folder.id === id)?.name ?? "folder" : "Uncategorized";
+  switch (event.eventType) {
+    case "item.created": return "Created item";
+    case "item.deleted": return "Deleted item";
+    case "item.restored": return "Restored item";
+    case "item.folder_changed": return `Moved to ${folderName(event.metadata.toFolderId)}`;
+    case "item.tags_changed": return "Changed tags";
+    case "item.favorite_changed": return event.metadata.favorite ? "Marked as favorite" : "Removed from favorite";
+    case "item.pinned_changed": return event.metadata.pinned ? "Pinned item" : "Unpinned item";
+    case "item.archived_changed": return event.metadata.archived ? "Archived item" : "Restored item";
+    case "item.item_notes_updated": return "Updated item notes";
+    case "item.extra_password_enabled": return "Enabled extra password";
+    case "item.extra_password_disabled": return "Removed extra password";
+    case "item.recent_2fa_required_changed": return event.metadata.requiresRecent2FA ? "Required recent 2FA" : "Removed recent 2FA requirement";
+    default: return "Updated encrypted payload";
+  }
+}
+
 function formatDateTime(value: string) {
   if (!value) return "Not saved yet";
-  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+  const date = new Date(value);
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const days = Math.round((startOfToday.getTime() - startOfDate.getTime()) / 86_400_000);
+  const time = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(date);
+  if (days === 0) return `Today at ${time}`;
+  if (days === 1) return `Yesterday at ${time}`;
+  if (days > 1 && days < 7) {
+    return `${new Intl.DateTimeFormat(undefined, { weekday: "short" }).format(date)} at ${time}`;
+  }
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    ...(date.getFullYear() !== now.getFullYear() ? { year: "numeric" } : {}),
+  }).format(date);
 }
 
 function formatHumanDate(value: string) {

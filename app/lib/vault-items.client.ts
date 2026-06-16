@@ -1,4 +1,12 @@
-import { decryptString, encryptString, generateRandomBytes } from "~/lib/crypto.client";
+import {
+  decryptNoteKey,
+  decryptString,
+  deriveKeyFromPassword,
+  encryptNoteKey,
+  encryptString,
+  generateNoteKey,
+  generateRandomBytes,
+} from "~/lib/crypto.client";
 import { createDocumentBlock } from "~/lib/document-blocks";
 import { normalizeTags } from "~/lib/folders";
 import {
@@ -6,6 +14,8 @@ import {
   type EncryptedVaultItem,
   type EncryptedVaultItemInput,
   type VaultItem,
+  type VaultItemEvent,
+  type VaultItemNotes,
   type VaultItemPayloadMap,
   type VaultItemType,
 } from "~/lib/vault-items";
@@ -20,16 +30,24 @@ export async function encryptVaultItemPayload<T extends VaultItemType>(
     favorite?: boolean;
     archived?: boolean;
     pinned?: boolean;
+    requiresRecent2FA?: boolean;
     folderId?: string | null;
+    itemKey?: CryptoKey;
+    itemNotes?: VaultItemNotes;
+    extraPasswordFields?: ExtraPasswordFields | null;
   },
 ): Promise<EncryptedVaultItemInput> {
   const tags = options.tags ?? [];
+  const contentKey = options.itemKey ?? masterKey;
   const [title, encryptedPayload, searchText, encryptedTags] = await Promise.all([
-    encryptString(options.title, masterKey),
-    encryptString(JSON.stringify(payload), masterKey),
-    encryptString(buildSearchText(options.title, tags, payload), masterKey),
-    encryptString(JSON.stringify(tags), masterKey),
+    encryptString(options.title, contentKey),
+    encryptString(JSON.stringify(payload), contentKey),
+    encryptString(buildSearchText(options.title, tags, payload), contentKey),
+    encryptString(JSON.stringify(tags), contentKey),
   ]);
+  const encryptedItemNotes = options.itemNotes
+    ? await encryptString(JSON.stringify(options.itemNotes), contentKey)
+    : null;
   return {
     type,
     folderId: options.folderId ?? null,
@@ -39,11 +57,18 @@ export async function encryptVaultItemPayload<T extends VaultItemType>(
     payloadIv: encryptedPayload.iv,
     encryptedSearchText: searchText.ciphertext,
     searchTextIv: searchText.iv,
+    ...(encryptedItemNotes ? {
+      encryptedItemNotes: encryptedItemNotes.ciphertext,
+      itemNotesIv: encryptedItemNotes.iv,
+    } : {}),
     tagsEncrypted: encryptedTags.ciphertext,
     tagsIv: encryptedTags.iv,
     favorite: options.favorite ?? false,
     archived: options.archived ?? false,
     pinned: options.pinned ?? false,
+    requiresRecent2FA: options.requiresRecent2FA ?? false,
+    hasExtraPassword: Boolean(options.extraPasswordFields),
+    ...(options.extraPasswordFields ?? {}),
     encryptionVersion: VAULT_ITEM_ENCRYPTION_VERSION,
   };
 }
@@ -51,25 +76,120 @@ export async function encryptVaultItemPayload<T extends VaultItemType>(
 export async function decryptVaultItemPayload<T extends VaultItemType>(
   item: EncryptedVaultItem & { type: T },
   masterKey: CryptoKey,
+  itemKey?: CryptoKey | null,
 ): Promise<VaultItem<T>> {
+  if (item.hasExtraPassword && !itemKey) {
+    return {
+      id: item.id,
+      type: item.type,
+      folderId: item.folderId,
+      title: "Protected item",
+      payload: getDefaultPayloadForType(item.type) as VaultItemPayloadMap[T],
+      tags: [],
+      favorite: item.favorite,
+      archived: item.archived,
+      pinned: item.pinned,
+      requiresRecent2FA: item.requiresRecent2FA ?? false,
+      hasExtraPassword: true,
+      extraPasswordSalt: item.extraPasswordSalt,
+      extraPasswordEncryptedItemKey: item.extraPasswordEncryptedItemKey,
+      extraPasswordItemKeyIv: item.extraPasswordItemKeyIv,
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt,
+    };
+  }
+  const contentKey = itemKey ?? masterKey;
   const [title, payload, tags] = await Promise.all([
-    decryptString({ ciphertext: item.encryptedTitle, iv: item.titleIv }, masterKey),
-    decryptString({ ciphertext: item.encryptedPayload, iv: item.payloadIv }, masterKey),
-    decryptString({ ciphertext: item.tagsEncrypted, iv: item.tagsIv }, masterKey),
+    decryptString({ ciphertext: item.encryptedTitle, iv: item.titleIv }, contentKey),
+    decryptString({ ciphertext: item.encryptedPayload, iv: item.payloadIv }, contentKey),
+    decryptString({ ciphertext: item.tagsEncrypted, iv: item.tagsIv }, contentKey),
   ]);
+  const itemNotes = item.encryptedItemNotes && item.itemNotesIv
+    ? JSON.parse(await decryptString({ ciphertext: item.encryptedItemNotes, iv: item.itemNotesIv }, contentKey)) as VaultItemNotes
+    : undefined;
   return {
     id: item.id,
     type: item.type,
     folderId: item.folderId,
     title,
     payload: JSON.parse(payload) as VaultItemPayloadMap[T],
+    itemNotes,
     tags: JSON.parse(tags) as string[],
     favorite: item.favorite,
     archived: item.archived,
     pinned: item.pinned,
+    requiresRecent2FA: item.requiresRecent2FA ?? false,
+    hasExtraPassword: item.hasExtraPassword,
+    extraPasswordSalt: item.extraPasswordSalt,
+    extraPasswordEncryptedItemKey: item.extraPasswordEncryptedItemKey,
+    extraPasswordItemKeyIv: item.extraPasswordItemKeyIv,
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
   };
+}
+
+interface ExtraPasswordFields {
+  extraPasswordSalt: string;
+  extraPasswordEncryptedItemKey: string;
+  extraPasswordItemKeyIv: string;
+}
+
+async function wrapItemKey(itemKey: CryptoKey, password: string): Promise<ExtraPasswordFields> {
+  const { key, salt } = await deriveKeyFromPassword(password);
+  const encrypted = await encryptNoteKey(itemKey, key);
+  return {
+    extraPasswordSalt: salt,
+    extraPasswordEncryptedItemKey: encrypted.ciphertext,
+    extraPasswordItemKeyIv: encrypted.iv,
+  };
+}
+
+export async function unlockProtectedVaultItemKey(item: EncryptedVaultItem, password: string) {
+  if (
+    !item.hasExtraPassword ||
+    !item.extraPasswordSalt ||
+    !item.extraPasswordEncryptedItemKey ||
+    !item.extraPasswordItemKeyIv
+  ) {
+    throw new Error("The item is not protected.");
+  }
+  const { key } = await deriveKeyFromPassword(password, item.extraPasswordSalt);
+  return decryptNoteKey({
+    ciphertext: item.extraPasswordEncryptedItemKey,
+    iv: item.extraPasswordItemKeyIv,
+  }, key);
+}
+
+export async function protectVaultItem<T extends VaultItemType>(
+  item: VaultItem<T>,
+  password: string,
+  masterKey: CryptoKey,
+) {
+  const itemKey = await generateNoteKey();
+  const extraPasswordFields = await wrapItemKey(itemKey, password);
+  return {
+    itemKey,
+    input: await encryptVaultItemPayload(item.type, item.payload, masterKey, {
+      title: item.title,
+      tags: item.tags,
+      favorite: item.favorite,
+      archived: item.archived,
+      pinned: item.pinned,
+      requiresRecent2FA: item.requiresRecent2FA,
+      folderId: item.folderId,
+      itemKey,
+      extraPasswordFields,
+    }),
+  };
+}
+
+export async function changeVaultItemExtraPassword(item: EncryptedVaultItem, currentPassword: string, newPassword: string) {
+  const itemKey = await unlockProtectedVaultItemKey(item, currentPassword);
+  return { itemKey, extraPasswordFields: await wrapItemKey(itemKey, newPassword) };
+}
+
+export async function removeVaultItemExtraPassword(item: EncryptedVaultItem, password: string) {
+  return unlockProtectedVaultItemKey(item, password);
 }
 
 export async function createVaultItem<T extends VaultItemType>(
@@ -112,11 +232,14 @@ export async function updateVaultItemTags(
   item: VaultItem,
   tags: string[],
   masterKey: CryptoKey,
+  itemKey?: CryptoKey | null,
 ) {
   tags = normalizeTags(tags);
+  const contentKey = item.hasExtraPassword ? itemKey : masterKey;
+  if (!contentKey) throw new Error("Unlock this item before changing tags.");
   const [encryptedTags, searchText] = await Promise.all([
-    encryptString(JSON.stringify(tags), masterKey),
-    encryptString(buildSearchText(item.title, tags, item.payload), masterKey),
+    encryptString(JSON.stringify(tags), contentKey),
+    encryptString(buildSearchText(item.title, tags, item.payload), contentKey),
   ]);
   return requestJson<{ item: EncryptedVaultItem }>(`/api/vault-items/${item.id}/tags`, {
     method: "PATCH", headers: { "Content-Type": "application/json" },
@@ -125,8 +248,37 @@ export async function updateVaultItemTags(
       tagsIv: encryptedTags.iv,
       encryptedSearchText: searchText.ciphertext,
       searchTextIv: searchText.iv,
+      tagCount: tags.length,
     }),
   });
+}
+
+export async function updateVaultItemNotes(
+  item: VaultItem,
+  markdown: string,
+  masterKey: CryptoKey,
+  itemKey?: CryptoKey | null,
+) {
+  const contentKey = item.hasExtraPassword ? itemKey : masterKey;
+  if (!contentKey) throw new Error("Unlock this item before changing notes.");
+  const itemNotes: VaultItemNotes = {
+    version: 1,
+    markdown,
+    updatedAt: new Date().toISOString(),
+  };
+  const encrypted = await encryptString(JSON.stringify(itemNotes), contentKey);
+  return requestJson<{ item: EncryptedVaultItem }>(`/api/vault-items/${item.id}/item-notes`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      encryptedItemNotes: encrypted.ciphertext,
+      itemNotesIv: encrypted.iv,
+    }),
+  });
+}
+
+export async function listVaultItemEvents(itemId: string) {
+  return requestJson<{ events: VaultItemEvent[] }>(`/api/vault-items/${itemId}/events`, { method: "GET" });
 }
 
 export const addTagToItem = (item: VaultItem, tag: string, masterKey: CryptoKey) =>
@@ -147,6 +299,24 @@ export async function archiveItem(itemId: string, archived: boolean) {
     method: "PATCH", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ archived }),
   });
+}
+
+export async function pinItem(itemId: string, pinned: boolean) {
+  return requestJson<{ item: EncryptedVaultItem }>(`/api/vault-items/${itemId}/pinned`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pinned }),
+  });
+}
+
+export async function requireRecent2FAForItem(itemId: string, requiresRecent2FA: boolean) {
+  return requestJson<{ item: EncryptedVaultItem }>(`/api/vault-items/${itemId}/recent-2fa`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ requiresRecent2FA }),
+  });
+}
+
+export async function authorizeSensitiveVaultAction() {
+  return requestJson<{ authorized: true }>("/api/vault-items/copy-authorize", { method: "GET" });
 }
 
 export function getDefaultPayloadForType(type: VaultItemType): VaultItemPayloadMap[VaultItemType] {
@@ -249,6 +419,11 @@ function pick(value: string) {
 
 async function requestJson<T>(url: string, init: RequestInit): Promise<T> {
   const response = await fetch(url, init);
-  if (!response.ok) throw new Error("The vault item operation failed.");
+  if (!response.ok) {
+    const error = new Error("The vault item operation failed.") as Error & { status?: number; data?: unknown };
+    error.status = response.status;
+    error.data = await response.json().catch(() => null);
+    throw error;
+  }
   return response.json() as Promise<T>;
 }

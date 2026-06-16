@@ -9,8 +9,8 @@ import type { Route } from "./+types/api.workspace";
 
 const workspaceSchema = z
   .object({
-    openNoteIds: z.array(z.string()).max(10),
-    activeNoteId: z.string().nullable(),
+    openNoteIds: z.array(z.string()).max(10).optional(),
+    activeNoteId: z.string().nullable().optional(),
     openItemIds: z.array(z.string()).max(10).optional(),
     activeItemId: z.string().nullable().optional(),
     activeFolderId: z.string().nullable().optional(),

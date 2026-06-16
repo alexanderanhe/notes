@@ -48,11 +48,23 @@ export interface VaultItem<T extends VaultItemType = VaultItemType> {
   folderId: string | null;
   title: string;
   payload: VaultItemPayloadMap[T];
+  itemNotes?: VaultItemNotes;
   tags: string[];
   favorite: boolean;
   archived: boolean;
   pinned: boolean;
+  requiresRecent2FA: boolean;
+  hasExtraPassword: boolean;
+  extraPasswordSalt?: string;
+  extraPasswordEncryptedItemKey?: string;
+  extraPasswordItemKeyIv?: string;
   createdAt: string;
+  updatedAt: string;
+}
+
+export interface VaultItemNotes {
+  version: 1;
+  markdown: string;
   updatedAt: string;
 }
 
@@ -65,12 +77,50 @@ export interface EncryptedVaultItemInput {
   payloadIv: string;
   encryptedSearchText: string;
   searchTextIv: string;
+  encryptedItemNotes?: string;
+  itemNotesIv?: string;
   tagsEncrypted: string;
   tagsIv: string;
   favorite: boolean;
   archived: boolean;
   pinned: boolean;
+  requiresRecent2FA: boolean;
+  hasExtraPassword: boolean;
+  extraPasswordSalt?: string;
+  extraPasswordEncryptedItemKey?: string;
+  extraPasswordItemKeyIv?: string;
   encryptionVersion: number;
+}
+
+export type VaultItemEventType =
+  | "item.created"
+  | "item.updated"
+  | "item.deleted"
+  | "item.restored"
+  | "item.folder_changed"
+  | "item.tags_changed"
+  | "item.favorite_changed"
+  | "item.pinned_changed"
+  | "item.archived_changed"
+  | "item.item_notes_updated"
+  | "item.extra_password_enabled"
+  | "item.extra_password_disabled"
+  | "item.recent_2fa_required_changed";
+
+export interface VaultItemEvent {
+  id: string;
+  eventType: VaultItemEventType;
+  metadata: {
+    fromFolderId?: string | null;
+    toFolderId?: string | null;
+    tagCount?: number;
+    favorite?: boolean;
+    pinned?: boolean;
+    archived?: boolean;
+    requiresRecent2FA?: boolean;
+    changedFields?: string[];
+  };
+  createdAt: string;
 }
 
 export interface EncryptedVaultItem extends EncryptedVaultItemInput {

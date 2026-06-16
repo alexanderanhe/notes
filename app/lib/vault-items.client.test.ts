@@ -6,6 +6,8 @@ import {
   encryptVaultItemPayload,
   generateSecurePassword,
   getDefaultPayloadForType,
+  protectVaultItem,
+  unlockProtectedVaultItemKey,
 } from "./vault-items.client";
 import { vaultItemTypesMatch } from "./vault-items";
 
@@ -57,6 +59,75 @@ describe("vault item client encryption", () => {
       createdAt: "2026-01-01T00:00:00.000Z",
       updatedAt: "2026-01-01T00:00:00.000Z",
     }, masterKey)).resolves.toMatchObject({ type: "document", payload });
+  });
+
+  it("encrypts item notes separately from typed payload fields", async () => {
+    const masterKey = await generateNoteKey();
+    const encrypted = await encryptVaultItemPayload("bookmark", {
+      url: "https://example.com",
+      description: "",
+      notes: "",
+    }, masterKey, {
+      title: "Reference",
+      itemNotes: {
+        version: 1,
+        markdown: "Private bookmark context",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      },
+    });
+
+    expect(JSON.stringify(encrypted)).not.toContain("Private bookmark context");
+    await expect(decryptVaultItemPayload({
+      ...encrypted,
+      id: "bookmark",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    }, masterKey)).resolves.toMatchObject({
+      itemNotes: { markdown: "Private bookmark context" },
+      payload: { url: "https://example.com" },
+    });
+  });
+
+  it("protects a vault item with an additional password", async () => {
+    const masterKey = await generateNoteKey();
+    const item = {
+      id: "document",
+      type: "document" as const,
+      folderId: "folder",
+      title: "Private document",
+      payload: {
+        version: 2 as const,
+        blocks: [{ id: "block-1", type: "paragraph" as const, content: "Protected text" }],
+      },
+      tags: ["private"],
+      favorite: false,
+      archived: false,
+      pinned: false,
+      requiresRecent2FA: false,
+      hasExtraPassword: false,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+    const { input } = await protectVaultItem(item, "extra-password", masterKey);
+    const encrypted = {
+      ...input,
+      id: item.id,
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt,
+    };
+
+    await expect(decryptVaultItemPayload(encrypted, masterKey)).resolves.toMatchObject({
+      title: "Protected item",
+      hasExtraPassword: true,
+    });
+    const itemKey = await unlockProtectedVaultItemKey(encrypted, "extra-password");
+    await expect(decryptVaultItemPayload(encrypted, masterKey, itemKey)).resolves.toMatchObject({
+      title: "Private document",
+      payload: item.payload,
+      tags: ["private"],
+      folderId: "folder",
+      hasExtraPassword: true,
+    });
   });
 
   it("provides defaults for every supported type", () => {
